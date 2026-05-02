@@ -1,0 +1,241 @@
+defaults:
+  tone: 'Energetic, human-centred storytelling that reveals TNT Motion engineers in action.
+
+    Blend approachable language with deep technical insight. Each post should feel like a
+
+    conversation on the shop floor or in the lab, never a corporate boilerplate.
+
+    Celebrate hands-on expertise in lubrication design, precision assembly, and demanding
+
+    applications such as compressors, pumps, turbocompressors, CNC machining, robotics, and
+
+    future-ready bearing innovations.
+
+    '
+  hashtags:
+  - '#TNTMotion'
+  - '#BearingExperts'
+  - '#MechanicalDesign'
+  - '#PrecisionEngineering'
+schedule:
+  timezone: Europe/Rome
+  slots:
+  - day: Tuesday
+    time: 09:00
+  - day: Thursday
+    time: 09:00
+image_provider:
+  provider: google-imagen
+  model: imagen-4.0-generate-001
+  size: 1024x1024
+  style_hint: High-end industrial photography with cinematic lighting and rich metallic textures. No text, no logos, no branding.
+  use_animated_gif: true
+  gif_num_frames: 6
+  gif_frame_duration: 1000
+  curated_library:
+  - url: https://images.unsplash.com/photo-1581091226825-a6a2a5aee158
+    alt_text: Technician adjusting bearings inside a CNC machine
+  - url: https://images.unsplash.com/photo-1517430816045-df4b7de11d1d
+    alt_text: Close-up of industrial bearings lined on a production table
+content_pillars:
+- name: 'Myth Busters: Bearing Secrets They Never Told You'
+  target_client: 'Maintenance engineers, purchasing managers, and plant operators who make daily decisions
+
+    about bearing selection and care based on outdated assumptions or vendor marketing.
+
+    '
+  angle: 'Challenge common industry myths with hard data and surprising truths. Start posts with
+
+    hooks like "90% of engineers get this wrong..." or "The bearing myth that costs factories
+
+    millions every year..." Back every claim with specific numbers, research citations, or
+
+    real case data. Make readers feel like they are getting insider knowledge that gives
+
+    them an edge over competitors still following old rules.
+
+    '
+  proof_points:
+  - 'Myth: sealed bearings never need maintenance. Reality: 40% fail prematurely from heat buildup in high-duty cycles'
+  - The 3x grease-quantity rule that most engineers still follow (and why modern high-speed spindles need half that amount)
+  - 'Myth: the cheapest bearing always saves money. A textile mill proved otherwise when frequent replacements cost 7x the
+    price of a premium unit'
+  - 'Myth: ceramic hybrids are only for aerospace. Reality: they cut vibration by up to 60% in standard CNC spindles running
+    above 15 000 rpm'
+  - 'Myth: alignment within 0.05 mm is good enough. In compressor applications, cutting that to 0.01 mm doubled mean time
+    between failures'
+  - 'Myth: grease colour indicates quality. Two identically coloured greases from different suppliers gave wildly different
+    L10 life results'
+  ctas:
+  - Which bearing myth has cost you the most? Drop it in the comments
+  - DM us your toughest bearing question - we will myth-bust it live
+  hashtags:
+  - '#BearingMyths'
+  - '#EngineeringFacts'
+  - '#MaintenanceTruth'
+  image_prompt: 'Dramatic close-up of a failed bearing cut in half showing internal damage, forensic
+
+    lighting style, metallic textures with visible wear patterns, industrial laboratory setting.
+
+    '
+- name: 'When Bearings Fail: Forensic Stories from the Field'
+  target_client: 'Reliability engineers, maintenance supervisors, and operations managers who deal with
+
+    unexpected equipment failures and need to prevent recurrence.
+
+    '
+  angle: 'Tell gripping detective stories about bearing failures. Open with the crisis moment:
+
+    "The call came at 3 AM - their main production line was down." Walk through the
+
+    investigation step by step. Include specific details: temperatures reached, vibration
+
+    readings, contamination levels found. End with the fix and the measurable outcome
+
+    (hours of downtime saved, euros recovered, repeat failures prevented).
+
+    '
+  proof_points:
+  - 'A food-processing plant lost 3 shifts of production when a sealed bearing seized in their main conveyor drive - root
+    cause: moisture ingress through a worn lip seal'
+  - A mining operator replaced the same crusher bearing every 4 months until we discovered abrasive slurry bypassing the housing
+    labyrinth
+  - Vibration analysis on a paper-mill dryer section flagged a developing inner-race spall 18 days before catastrophic failure
+  - A cement plant gearbox ran 15 degrees hotter than spec for weeks - the forensic teardown revealed micro-pitting from incorrect
+    viscosity grease
+  - An HVAC chiller compressor in a Dubai data centre tripped on overload - investigation traced the fault to axial thrust
+    from thermal expansion
+  - A wind-turbine gearbox showed white-etching cracks after only 30 months - metallurgical analysis pointed to hydrogen embrittlement
+    from a lubricant reaction
+  ctas:
+  - Got a mystery failure you never solved? Share it - let us investigate together
+  - Tag a colleague who would appreciate this forensic breakdown
+  hashtags:
+  - '#FailureAnalysis'
+  - '#ReliabilityEngineering'
+  - '#RootCauseAnalysis'
+  image_prompt: 'Engineer with magnifying glass examining damaged bearing under bright forensic lighting,
+
+    data charts and vibration graphs visible on screen in background, industrial diagnostic setting.
+
+    '
+- name: 'Extreme Applications: Bearings at the Limit'
+  target_client: 'OEM design engineers, R&D teams, and technical directors working on high-performance
+
+    machinery in demanding environments - from Arctic installations to cleanroom robotics.
+
+    '
+  angle: 'Showcase bearings operating in extreme conditions with specific technical data.
+
+    Start with the challenge: "-40C Arctic compressor station" or "50,000 RPM dental
+
+    turbine" or "Class 100 cleanroom robot arm". Include the engineering solution and
+
+    real performance numbers. Reference cutting-edge materials: hybrid ceramics, special
+
+    coatings, advanced lubricants. Make readers think "I did not know bearings could do that."
+
+    '
+  proof_points:
+  - How we achieved 80 000+ hour life in a turbocompressor running at 280 C continuous discharge temperature
+  - A ceramic hybrid solution that cut vibration by 70% in high-speed CNC spindles operating above 20 000 rpm
+  - 'From the lab to an Arctic gas pipeline: the 18-month field trial that validated our cold-weather bearing design at -45
+    C'
+  - A subsea pump application demanded 5 years maintenance-free operation under 200 bar pressure - our engineers delivered
+    with a custom seal-and-bearing package
+  - Robotic arms in a Class-10 cleanroom required near-zero particle generation - special polymer cages and dry-film lubrication
+    made it possible
+  - A steel mill reheat furnace needed bearings surviving 350 C radiant heat with water-spray cooling cycles every 8 hours
+  ctas:
+  - What is the most extreme environment your bearings operate in?
+  - Designing something demanding? Let us engineer the bearing solution together
+  hashtags:
+  - '#ExtremeEngineering'
+  - '#HighPerformance'
+  - '#BearingInnovation'
+  image_prompt: 'Dramatic industrial scene showing machinery in extreme environment - either frozen
+
+    industrial setting with ice crystals, or high-tech cleanroom with robotic arms,
+
+    emphasizing harsh conditions and precision equipment.
+
+    '
+- name: 'Inside the Factory: Stories from Our Engineers'
+  target_client: 'Technical decision-makers who want to understand the people and processes behind
+
+    the products - building trust through transparency and human connection.
+
+    '
+  angle: 'Take readers behind the scenes with first-person stories from TNT Motion engineers.
+
+    "Last week I visited a client in Germany..." or "After 15 years in this business,
+
+    here is what still surprises me..." Share the human side: the problem-solving process,
+
+    the unexpected discoveries, the satisfaction of a machine running smoothly. Include
+
+    specific technical details but wrap them in personal narrative.
+
+    '
+  proof_points:
+  - What our quality lab learned from inspecting 500+ returned bearings last year - the failure patterns nobody talks about
+  - A client visit in Turkey that changed how we recommend lubrication intervals for tropical climates
+  - 'A day in our quality lab: the 12 tests every bearing passes before it earns the TNT Motion stamp'
+  - The Brazilian distributor who challenged us to cut delivery lead-time by half - and how our logistics team made it happen
+  - An engineer on site in Poland spotted micro-corrosion caused by condensation during container shipping - now we nitrogen-flush
+    every export pallet
+  - Our R&D team spent 6 months co-developing a custom cage geometry for a pump OEM - the result outperformed the original
+    spec by 40%
+  ctas:
+  - What would you want to see from inside our operations? Tell us in the comments
+  - Questions for our engineering team? We read every message
+  hashtags:
+  - '#BehindTheScenes'
+  - '#EngineeringLife'
+  - '#QualityMatters'
+  image_prompt: 'Authentic workshop scene with engineer examining bearing with precision instruments,
+
+    warm industrial lighting, workbench with tools and technical drawings visible,
+
+    conveying expertise and craftsmanship.
+
+    '
+- name: 'Product Spotlight: Speciality & Non-Standard Solutions'
+  target_client: >
+    Design engineers, OEM procurement teams, and distributors sourcing speciality components
+    for demanding or non-standard applications — CNC machining, fastening systems, high-temperature
+    machinery, precision power transmission, and turbine/energy equipment.
+  angle: >
+    Showcase TNT Motion's speciality and non-standard products with sharp technical detail.
+    Rotate across products each post: Collets (precision workholding), 拉钉 / Rivet Nuts (blind fastening),
+    Hybrid Bearings (ceramic balls + steel races), Double Row Preloaded Bearings (zero-axial-play matched pairs),
+    High Temperature Bearings (to 300°C), and Turbine Bearings (steam, gas, wind). Name the product in the
+    headline, state one clear performance claim, then explain why engineers choose it over a standard solution.
+  proof_points:
+  - 'Collet (ER series): concentricity to 0.003 mm in ER8–ER50 sizes — eliminates tool run-out and extends
+    cutting-insert life in CNC turning and milling centres'
+  - '拉钉 / Rivet Nut: blind fastening from M4 to M12 without rear access — pull-out rated to DIN 7337,
+    essential for thin-wall sheet metal panels, aluminium profiles, and composite assemblies'
+  - 'Hybrid Bearing: Si3N4 ceramic balls on steel races — 60% lower ball density, 40% less friction heat,
+    rated for CNC spindles above 15,000 rpm and e-motor applications where electrical current erosion is a risk'
+  - 'Double Row Preloaded Bearing: factory-set preload removes axial play under bi-directional loads — used
+    in ball-screw drives, spindle heads, and servo axis applications demanding micron-level repeatability'
+  - 'High Temperature Bearing: solid-lubricant cage or high-temperature grease rated for continuous 300°C
+    service — engineered for furnace fans, heat-treatment conveyor systems, and paper-mill dryer sections'
+  - 'Turbine Bearing: combined radial + axial load capacity at high rpm for steam, gas, and wind turbines
+    — ISO P5 or better tolerance, low-noise certified, matched pairs available for main shaft applications'
+  ctas:
+  - Request our speciality product catalogue — DM or email info@tntbearings.com
+  - Is your application using a standard solution where a speciality unit would outperform? Let us evaluate it
+  - Tag a colleague sourcing non-standard bearing or fastening components
+  hashtags:
+  - '#HybridBearings'
+  - '#SpecialityBearings'
+  - '#TurbineBearings'
+  - '#HighTempEngineering'
+  - '#PrecisionComponents'
+  image_prompt: >
+    Clean industrial macro photography of a precision engineering component — collet chuck, ceramic
+    hybrid bearing cross-section, or turbine shaft assembly — on a machined steel surface under
+    dramatic directional lighting that reveals metallic texture and engineering tolerances. No text,
+    no logos, no labels anywhere in the image.

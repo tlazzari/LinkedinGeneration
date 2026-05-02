@@ -1,0 +1,21 @@
+# CRITICAL — contains API keys (Gemini, OpenRouter, LinkedIn OAuth, FRED)
+.env
+.env.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs (regenerate daily)
+logs/
+*.log
+
+# Build / venv
+venv/
+
+# OS / editor
+.DS_Store
+*.bak
+*.backup_*
+*.tmp
