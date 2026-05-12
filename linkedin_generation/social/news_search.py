@@ -39,6 +39,24 @@ def get_pillar_search_queries():
             f"European investment China market {year}",
             f"China Europe trade business news {year}",
         ],
+        "M&A Insights": [
+            f"China Europe M&A deal acquisition {year}",
+            f"Chinese company European acquisition {year}",
+            f"European company China investment deal {year}",
+            f"cross-border merger China Europe {year}",
+        ],
+        "Thought Leadership": [
+            f"Europe China M&A regulatory outlook {year}",
+            f"Chinese industrial capital Europe strategic assets {year}",
+            f"family business succession M&A Germany Italy {year}",
+            f"Europe China investment banking advisory {year}",
+        ],
+        "Industry Expertise": [
+            f"China Europe EV supply chain M&A {year}",
+            f"precision manufacturing cross-border deal {year}",
+            f"Chinese automation company Europe acquisition {year}",
+            f"industrial technology China Europe investment {year}",
+        ],
     }
 
 PILLAR_SEARCH_QUERIES = get_pillar_search_queries()
@@ -166,7 +184,7 @@ def search_news_gemini(query: str, num_results: int = 5) -> List[dict]:
         import json as json_module
 
         # Use Gemini with Google Search grounding
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
 
         from datetime import datetime
         current_year = datetime.now().year

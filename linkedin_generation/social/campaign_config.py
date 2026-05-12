@@ -32,6 +32,12 @@ class PostPillar:
     hashtags: Sequence[str] = field(default_factory=list)
     image_prompt: str | None = None
     use_news_search: bool = False
+    # Veo video generation: set True to generate an MP4 instead of a static image.
+    # RULE: if use_veo=True, video_prompt must be set and be 16:9 safe (no people).
+    use_veo: bool = False
+    video_prompt: str | None = None
+    # RULE: if use_chart=True, seta_chart_generator.py generates the image (animated data GIF).
+    use_chart: bool = False
 
 
 @dataclass(frozen=True)
@@ -67,6 +73,14 @@ class CampaignConfig:
 
         pillars: List[PostPillar] = []
         for entry in data.get("content_pillars", []):
+            use_veo = bool(entry.get("use_veo", False))
+            video_prompt = entry.get("video_prompt") or None
+            use_chart = bool(entry.get("use_chart", False))
+            if use_veo and not video_prompt:
+                raise ValueError(
+                    f"Pillar '{entry['name']}' has use_veo=true but no video_prompt set. "
+                    "Every Veo pillar MUST have a video_prompt (16:9, no people).",
+                )
             pillars.append(
                 PostPillar(
                     name=entry["name"],
@@ -77,6 +91,9 @@ class CampaignConfig:
                     hashtags=list(entry.get("hashtags", [])),
                     image_prompt=entry.get("image_prompt"),
                     use_news_search=entry.get("use_news_search", False),
+                    use_veo=use_veo,
+                    video_prompt=video_prompt,
+                    use_chart=use_chart,
                 )
             )
 

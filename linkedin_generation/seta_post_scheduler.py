@@ -26,9 +26,11 @@ from linkedin_generation.social.image_providers import (
     ImagePayload,
     ImageProviderConfig,
     GoogleImagenProvider,
+    ReplicateVideoProvider,
     create_image_provider,
 )
 from linkedin_generation.social.news_search import fetch_article_preview_image
+from linkedin_generation.social.seta_chart_generator import generate_market_chart, CHART_TYPES
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CAMPAIGN_CONFIG = Path(os.path.expanduser("~/seta_linkedin_campaign.yaml"))
@@ -45,6 +47,7 @@ SETA_LOGO_PATH = PROJECT_ROOT / "assets" / "seta_capital_logo.png"
 class RotationState:
     last_post_type: str = "technical"
     last_pillar_index: int = -1
+    last_chart_type_index: int = -1
 
     @classmethod
     def load(cls, path: Path) -> "RotationState":
@@ -58,12 +61,14 @@ class RotationState:
         return cls(
             last_post_type=data.get("last_post_type", "technical"),
             last_pillar_index=data.get("last_pillar_index", -1),
+            last_chart_type_index=data.get("last_chart_type_index", -1),
         )
 
     def save(self, path: Path) -> None:
         payload = {
             "last_post_type": self.last_post_type,
             "last_pillar_index": self.last_pillar_index,
+            "last_chart_type_index": self.last_chart_type_index,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(payload))
@@ -71,6 +76,10 @@ class RotationState:
     def next_pillar_index(self, total: int) -> int:
         self.last_pillar_index = (self.last_pillar_index + 1) % total
         return self.last_pillar_index
+
+    def next_chart_type_index(self) -> int:
+        self.last_chart_type_index = (self.last_chart_type_index + 1) % len(CHART_TYPES)
+        return self.last_chart_type_index
 
     def plan_post_type(self) -> str:
         # Alternate between promotional and technical
@@ -198,8 +207,11 @@ def generate_image_for_post(
             model=campaign.image_provider.model or "imagen-4.0-generate-001",
             size=campaign.image_provider.size or "1024x1024",
             style_hint=campaign.image_provider.style_hint,
+            use_animated_gif=campaign.image_provider.use_animated_gif,
+            gif_num_frames=campaign.image_provider.gif_num_frames,
+            gif_frame_duration=campaign.image_provider.gif_frame_duration,
         )
-        provider = GoogleImagenProvider(provider_config)
+        provider = create_image_provider(provider_config)
 
         # Enhance prompt with news context if available
         prompt = post.image_prompt
@@ -226,6 +238,50 @@ def generate_image_for_post(
             )
 
         raise
+
+
+def generate_video_for_post(
+    *,
+    campaign: CampaignConfig,
+    post: GeneratedPost,
+    pillar,
+    target_dir: Path,
+) -> Optional[Path]:
+    """Generate a Veo 2 video for pillars with use_veo=True.
+
+    Tries Replicate (Veo 2) first, then Google Veo REST, returns None on full failure
+    so the caller can fall back to a static Imagen image.
+    16:9 aspect ratio is the only one Veo accepts.
+    """
+    video_prompt = pillar.video_prompt or post.video_prompt or (
+        f"Cinematic 16:9 professional footage evoking {pillar.angle.lower()[:80]}. "
+        "Atmospheric, documentary style, warm professional colour grade."
+    )
+
+    replicate_token = os.getenv("REPLICATE_API_TOKEN")
+    if replicate_token:
+        try:
+            provider = ReplicateVideoProvider(campaign.image_provider)
+            video_path = provider.get_video(prompt=video_prompt, target_dir=target_dir)
+            logging.info("Veo 2 (Replicate) video generated: %s", video_path)
+            return video_path
+        except Exception as exc:
+            logging.warning("Replicate Veo 2 failed, trying Google Veo REST: %s", exc)
+
+    try:
+        provider_cfg = ImageProviderConfig(
+            provider="google",
+            model="veo-2.0-generate-001",
+            size="1920x1080",
+        )
+        google_provider = GoogleImagenProvider(provider_cfg)
+        video_path = google_provider.get_video(prompt=video_prompt, target_dir=target_dir)
+        logging.info("Google Veo video generated: %s", video_path)
+        return video_path
+    except Exception as exc:
+        logging.warning("Google Veo also failed — falling back to static image: %s", exc)
+
+    return None
 
 
 def slugify(text: str) -> str:
@@ -323,63 +379,133 @@ def run_single_generation(
 
     logging.info(f"Selected pillar: {pillar.name} (news_search={pillar.use_news_search})")
 
-    # Generate post
+    # Generate video (for Veo pillars) or image
+    images_dir = output_dir / "images"
+    videos_dir = output_dir / "videos"
+
+    video_path: Optional[Path] = None
+    image_payload: Optional[ImagePayload] = None
+    chart_data_summary: str = ""
+
+    if pillar.use_chart:
+        # Market Intelligence pillar — fetch data and render chart FIRST so the
+        # LLM can reference the actual numbers in the post copy.
+        chart_type_idx = rotation_state.next_chart_type_index()
+        logging.info("Pillar '%s' uses chart (type index %d)", pillar.name, chart_type_idx)
+        chart_gif_path, chart_data_summary = generate_market_chart(
+            target_dir=images_dir,
+            chart_type_index=chart_type_idx,
+            n_frames=25,
+            frame_ms=120,
+        )
+        if not chart_gif_path:
+            logging.error(
+                "Chart data fetch failed for pillar '%s': %s — skipping post.",
+                pillar.name, chart_data_summary,
+            )
+            return
+
+    # Generate post (chart pillars pass live data summary so LLM references real numbers)
     post = generator.generate(
         pillar=pillar,
         scheduled_for=scheduled_for,
         post_type=post_type,
         image_mode="photo",
+        chart_data=chart_data_summary,
     )
 
-    # Generate/fetch image
-    images_dir = output_dir / "images"
-    try:
-        image_payload = generate_image_for_post(
-            campaign=campaign,
-            post=post,
-            target_dir=images_dir,
-        )
-    except Exception as e:
-        logging.error(f"Image generation failed: {e}")
-        # Use a placeholder
+    if pillar.use_chart:
         image_payload = ImagePayload(
-            provider="none",
+            prompt=pillar.image_prompt or post.image_prompt or f"Market data chart for {pillar.name}",
+            provider="seta_chart_generator",
+            path=chart_gif_path,
             alt_text=post.alt_text,
         )
+
+    elif pillar.use_veo:
+        logging.info("Pillar '%s' uses Veo — attempting video generation", pillar.name)
+        try:
+            video_path = generate_video_for_post(
+                campaign=campaign,
+                post=post,
+                pillar=pillar,
+                target_dir=videos_dir,
+            )
+        except Exception as e:
+            logging.error("Video generation raised unexpectedly: %s", e)
+
+        if video_path is None:
+            # Veo failed — fall back to Imagen static image so the post still goes out
+            logging.warning(
+                "Veo generation failed for pillar '%s' — falling back to Imagen image.",
+                pillar.name,
+            )
+            try:
+                image_payload = generate_image_for_post(
+                    campaign=campaign,
+                    post=post,
+                    target_dir=images_dir,
+                )
+            except Exception as _img_err:
+                logging.error("Imagen fallback also failed for '%s': %s — skipping.", pillar.name, _img_err)
+                return
+
+    else:
+        # Non-Veo, non-chart pillar (e.g. Industry Expertise) — animated GIF image
+        try:
+            image_payload = generate_image_for_post(
+                campaign=campaign,
+                post=post,
+                target_dir=images_dir,
+            )
+        except Exception as e:
+            logging.error(f"Image generation failed: {e}")
+            image_payload = ImagePayload(provider="none", alt_text=post.alt_text)
 
     # Publish if configured
     extra_metadata: Dict[str, str] = {
         "pillar": pillar.name,
         "post_type": post_type,
         "news_enabled": str(pillar.use_news_search),
+        "media_type": "video" if video_path else "image",
     }
 
     if post.news_articles:
         extra_metadata["news_sources"] = ", ".join(a.source for a in post.news_articles)
 
     if publisher:
-        local_image_path = ensure_local_image_file(
-            image=image_payload,
-            fallback_dir=images_dir,
-            timestamp=scheduled_for,
-        )
-
-        publish_result = publisher.publish_post(
-            text=post.as_text,
-            headline=post.headline,
-            alt_text=post.alt_text,
-            image_path=local_image_path,
-        )
+        if video_path:
+            publish_result = publisher.publish_video_post(
+                text=post.as_text,
+                headline=post.headline,
+                alt_text=post.alt_text,
+                video_path=video_path,
+            )
+        else:
+            local_image_path = ensure_local_image_file(
+                image=image_payload,
+                fallback_dir=images_dir,
+                timestamp=scheduled_for,
+            )
+            publish_result = publisher.publish_post(
+                text=post.as_text,
+                headline=post.headline,
+                alt_text=post.alt_text,
+                image_path=local_image_path,
+            )
 
         if publish_result.get("share_urn"):
             extra_metadata["linkedin_share_urn"] = publish_result["share_urn"]
             logging.info(f"Published to LinkedIn: {publish_result['share_urn']}")
 
     # Save artifacts
+    used_image = image_payload or ImagePayload(provider="none", alt_text=post.alt_text)
+    if video_path:
+        extra_metadata["video_file"] = video_path.name
     metadata_path = save_artifacts(
         output_dir=output_dir,
         post=post,
-        image=image_payload,
+        image=used_image,
         extra_metadata=extra_metadata,
     )
     logging.info(f"Saved post artefacts to {metadata_path}")

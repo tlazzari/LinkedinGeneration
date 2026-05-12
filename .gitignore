@@ -19,3 +19,7 @@ venv/
 *.bak
 *.backup_*
 *.tmp
+
+# Generated post output (content + large image/video files)
+linkedin_generation/linkedin_posts/
+linkedin_generation/seta_posts/

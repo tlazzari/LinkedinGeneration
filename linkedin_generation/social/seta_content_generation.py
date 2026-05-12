@@ -95,6 +95,7 @@ class SetaLinkedInPostGenerator:
         post_type: str,
         image_mode: str,
         holiday: "HolidayEvent" | None = None,
+        chart_data: str = "",
     ) -> GeneratedPost:
         # Search for news if pillar requires it
         news_articles: List[NewsArticle] = []
@@ -115,19 +116,31 @@ class SetaLinkedInPostGenerator:
                 image_mode=image_mode,
                 holiday=holiday,
                 news_context=news_context,
+                chart_data=chart_data,
             ),
             temperature=0.8,
-            max_tokens=800,  # Increased for longer posts with links
+            max_tokens=800,
         )
         payload = self._parse_response(raw)
+
+        # Strip hallucinated URLs when no real news sources were provided
+        if not news_articles and post_type != "holiday":
+            import re
+            url_pattern = re.compile(r'\[?(https?://[^\s\]\)]+)\]?(?:\([^\)]+\))?')
+            for field in ("body", "headline", "cta"):
+                if field in payload and isinstance(payload[field], str):
+                    cleaned = url_pattern.sub('', payload[field])
+                    cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
+                    payload[field] = cleaned
         hashtags = payload.get("hashtags") or []
         if isinstance(hashtags, str):
             hashtags = [tag.strip() for tag in hashtags.split() if tag.strip()]
 
         all_hashtags = self._merge_hashtags(list(hashtags), pillar)
 
-        # Build image prompt based on news if available
-        base_image_prompt = payload.get("image_prompt") or pillar.image_prompt or pillar.angle
+        # YAML pillar.image_prompt is authoritative (human-reviewed, people-centric).
+        # LLM image_prompt is only used if the YAML has nothing set.
+        base_image_prompt = pillar.image_prompt or payload.get("image_prompt") or pillar.angle
         if news_articles and pillar.use_news_search:
             # Enhance image prompt with news context
             news_summary = news_articles[0].title if news_articles else ""
@@ -172,6 +185,7 @@ class SetaLinkedInPostGenerator:
         image_mode: str,
         holiday: "HolidayEvent" | None = None,
         news_context: str = "",
+        chart_data: str = "",
     ) -> str:
         proof_points = "\n".join(f"- {item}" for item in pillar.proof_points) or "- Strategic M&A advisory\n- Cross-border expertise"
         ctas = ", ".join(pillar.ctas or ["Connect with our advisory team", "Request a strategic briefing"])
@@ -188,11 +202,15 @@ class SetaLinkedInPostGenerator:
                 "- Close with a professional CTA inviting engagement."
             )
         elif post_type == "technical":
+            if news_context and pillar.use_news_search:
+                url_directive = "- Include the FULL URL from the provided news sources (see below).\n"
+            else:
+                url_directive = "- Do NOT include any external links or URLs in the post body — Seta Capital's expertise should speak for itself.\n"
             post_directives = (
                 "- Provide substantive analysis with specific data points.\n"
                 "- Reference actual market trends, deals, or economic indicators.\n"
-                "- Include at least one full URL to a source article.\n"
-                "- Position Seta Capital as a knowledgeable thought leader."
+                + url_directive
+                + "- Position Seta Capital as a knowledgeable thought leader."
             )
         else:  # holiday
             image_hint = f"authentic celebrations of {holiday_name}"
@@ -219,6 +237,22 @@ class SetaLinkedInPostGenerator:
         else:
             news_requirements = ""
 
+        # Chart data requirements — Market Intelligence pillar
+        if chart_data:
+            chart_requirements = (
+                "\n\nLIVE MARKET DATA — YOU MUST USE THESE EXACT FIGURES:\n"
+                f"{chart_data}\n"
+                "\n"
+                "MANDATORY RULES for Market Intelligence posts:\n"
+                "1. Quote at least TWO specific numbers from the data above (e.g. EUR/CNY rate, GDP %, yield)\n"
+                "2. Explain what the movement means for cross-border M&A deal valuations or timing\n"
+                "3. Connect the data to Seta Capital's Europe-China advisory positioning\n"
+                "4. Do NOT invent or estimate numbers — only use the figures provided above\n"
+                "5. Keep the tone analytical and authoritative — this is for CFOs and PE partners\n"
+            )
+        else:
+            chart_requirements = ""
+
         # Image requirements
         if post_type == "holiday":
             image_requirements = (
@@ -228,18 +262,19 @@ class SetaLinkedInPostGenerator:
         else:
             if news_context and pillar.use_news_search:
                 image_requirements = (
-                    "- Image_prompt should be INSPIRED by the specific news being discussed.\n"
-                    "  If about tech/EV deals: show electric vehicles, batteries, or futuristic technology.\n"
-                    "  If about manufacturing: show modern factories, automation, or logistics.\n"
-                    "  If about market data: show data visualizations, charts, or financial imagery.\n"
-                    "  If about deals/M&A: show professional handshakes, boardrooms, or cityscapes.\n"
-                    "  Make it relevant to the SPECIFIC news topic.\n"
+                    "- Image_prompt MUST feature real human professionals relevant to the news topic.\n"
+                    "  If about tech/EV deals: show engineers or executives examining EV components.\n"
+                    "  If about manufacturing: show workers or managers on a modern factory floor.\n"
+                    "  If about market data: show a financial analyst reviewing charts at a desk.\n"
+                    "  If about deals/M&A: show professionals shaking hands in a meeting room.\n"
+                    "  NO empty buildings, NO city skylines without people.\n"
                     "  NO text, NO logos, NO branding visible in the image."
                 )
             else:
                 image_requirements = (
-                    "- Image_prompt should describe professional corporate imagery.\n"
-                    "  Focus on: cityscapes, boardrooms, global business themes, technology.\n"
+                    "- Image_prompt MUST feature real human professionals "
+                    "(e.g. advisor shaking hands, executives in meeting, engineer on factory floor).\n"
+                    "  NO empty buildings, NO city skylines without people, NO generic glass offices.\n"
                     "  NO text, NO logos, NO branding visible in the image."
                 )
 
@@ -263,6 +298,7 @@ class SetaLinkedInPostGenerator:
             f"Tone guidance: {self.campaign.tone}.\n"
             f"Apply these directives:\n{post_directives}\n"
             f"{news_requirements}"
+            f"{chart_requirements}"
             "\nOutput must be JSON with keys headline, body, cta, hashtags (list), image_prompt, video_prompt, alt_text.\n"
             "Constraints:\n"
             "- Keep total length 150-250 words across headline + body + CTA.\n"

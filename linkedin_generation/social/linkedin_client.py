@@ -66,7 +66,39 @@ class LinkedInPublisher:
             "response": post_response,
         }
 
-    # --- Internal helpers -------------------------------------------------
+    def publish_video_post(
+        self,
+        *,
+        text: str,
+        headline: str,
+        alt_text: str,
+        video_path: Path,
+    ) -> Dict[str, Any]:
+        """Upload an MP4 and publish it as a native LinkedIn video post."""
+        asset_info = self._register_video_upload()
+        upload_url = asset_info["uploadUrl"]
+        asset = asset_info["asset"]
+
+        self._upload_video(upload_url=upload_url, video_path=video_path)
+        post_response = self._create_video_share(
+            asset=asset,
+            text=text,
+            headline=headline,
+            alt_text=alt_text,
+        )
+
+        share_urn = post_response.get("id")
+        permalink = f"https://www.linkedin.com/feed/update/{share_urn}" if share_urn else None
+        logging.info("LinkedIn video post published: asset=%s share_urn=%s", asset, share_urn)
+
+        return {
+            "asset": asset,
+            "share_urn": share_urn,
+            "permalink": permalink,
+            "response": post_response,
+        }
+
+        # --- Internal helpers -------------------------------------------------
 
     def _headers(self) -> Dict[str, str]:
         return {
@@ -142,6 +174,79 @@ class LinkedInPublisher:
             },
             "visibility": {
                 "com.linkedin.ugc.MemberNetworkVisibility": self.config.visibility,
+            },
+        }
+        url = f"{LINKEDIN_API_BASE}/ugcPosts"
+        response = requests.post(url, json=payload, headers=self._headers(), timeout=30)
+        response.raise_for_status()
+        return response.json()
+
+    def _register_video_upload(self) -> Dict[str, Any]:
+        payload = {
+            "registerUploadRequest": {
+                "owner": self.config.owner_urn,
+                "recipes": ["urn:li:digitalmediaRecipe:feedshare-video"],
+                "serviceRelationships": [
+                    {
+                        "relationshipType": "OWNER",
+                        "identifier": "urn:li:userGeneratedContent",
+                    }
+                ],
+            }
+        }
+        url = f"{LINKEDIN_API_BASE}/assets?action=registerUpload"
+        response = requests.post(url, json=payload, headers=self._headers(), timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        value: Dict[str, Any] = data.get("value", {})
+        upload_info: Optional[Dict[str, Any]] = value.get("uploadMechanism", {}).get(
+            "com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest"
+        )
+        if not upload_info:
+            raise RuntimeError("LinkedIn registerUpload (video) response missing upload URL")
+        upload_url = upload_info.get("uploadUrl")
+        asset = value.get("asset")
+        if not upload_url or not asset:
+            raise RuntimeError("LinkedIn registerUpload (video) response missing asset/uploadUrl")
+        return {"asset": asset, "uploadUrl": upload_url}
+
+    def _upload_video(self, *, upload_url: str, video_path: Path) -> None:
+        binary = video_path.read_bytes()
+        response = requests.put(
+            upload_url,
+            data=binary,
+            headers={"Content-Type": "application/octet-stream"},
+            timeout=180,
+        )
+        response.raise_for_status()
+
+    def _create_video_share(
+        self,
+        *,
+        asset: str,
+        text: str,
+        headline: str,
+        alt_text: str,
+    ) -> Dict[str, Any]:
+        payload = {
+            "author": self.config.owner_urn,
+            "lifecycleState": "PUBLISHED",
+            "specificContent": {
+                "com.linkedin.ugc.ShareContent": {
+                    "shareCommentary": {"text": text},
+                    "shareMediaCategory": "VIDEO",
+                    "media": [
+                        {
+                            "status": "READY",
+                            "media": asset,
+                            "title": {"text": headline},
+                            "description": {"text": alt_text},
+                        }
+                    ],
+                }
+            },
+            "visibility": {
+                "com.linkedin.ugc.MemberNetworkVisibility": self.config.visibility
             },
         }
         url = f"{LINKEDIN_API_BASE}/ugcPosts"

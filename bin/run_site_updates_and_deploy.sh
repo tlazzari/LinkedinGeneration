@@ -1,0 +1,1 @@
+/opt/seo/bin/run_site_updates_and_deploy.sh

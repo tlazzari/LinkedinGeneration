@@ -2,11 +2,11 @@
 import os, sys, subprocess, yaml
 from pathlib import Path
 
-PROJECT_ROOT = Path('/home/d1yjs0joned1/LinkedinGeneration')
-SEO_ROOT     = Path('/home/d1yjs0joned1/GenerativeSEOProject')
-COMMONLIB    = Path('/home/d1yjs0joned1/CommonLib')
+PROJECT_ROOT = Path('/opt/linkedin')
+SEO_ROOT     = Path('/opt/seo')
+COMMONLIB    = Path('/opt/commonlib')
 PKG_DIR      = PROJECT_ROOT / 'linkedin_generation'
-PYTHON_BIN   = '/home/d1yjs0joned1/miniconda/envs/generative-seo/bin/python'
+PYTHON_BIN   = '/opt/venv/bin/python'
 CAMPAIGN_YAML = PROJECT_ROOT / 'config' / 'linkedin_campaign.yaml'
 
 class TestRun:

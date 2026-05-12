@@ -1,0 +1,13 @@
+[
+  {"name": "New Year's Day", "start_date": "2025-01-01", "end_date": "2025-01-01"},
+  {"name": "Epiphany", "start_date": "2025-01-06", "end_date": "2025-01-06"},
+  {"name": "Easter Monday", "start_date": "2025-04-21", "end_date": "2025-04-21"},
+  {"name": "Liberation Day", "start_date": "2025-04-25", "end_date": "2025-04-25"},
+  {"name": "Labour Day", "start_date": "2025-05-01", "end_date": "2025-05-01"},
+  {"name": "Republic Day", "start_date": "2025-06-02", "end_date": "2025-06-02"},
+  {"name": "Ferragosto", "start_date": "2025-08-15", "end_date": "2025-08-15"},
+  {"name": "All Saints' Day", "start_date": "2025-11-01", "end_date": "2025-11-01"},
+  {"name": "Immaculate Conception", "start_date": "2025-12-08", "end_date": "2025-12-08"},
+  {"name": "Christmas Day", "start_date": "2025-12-25", "end_date": "2025-12-25"},
+  {"name": "St. Stephen's Day", "start_date": "2025-12-26", "end_date": "2025-12-26"}
+]

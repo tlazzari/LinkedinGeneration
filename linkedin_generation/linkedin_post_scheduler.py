@@ -237,7 +237,11 @@ def maybe_run_biweekly_site_updates() -> None:
             check=True,
             cwd=PROJECT_ROOT,
             env=env,
+            timeout=120,
         )
+    except subprocess.TimeoutExpired:
+        logging.error("Site update pipeline timed out after 120s — skipping to avoid blocking posts")
+        return
     except subprocess.CalledProcessError as exc:
         logging.error("Site update pipeline failed with exit code %s", exc.returncode)
         return
@@ -356,21 +360,11 @@ def generate_image_with_fallback(
     use_animated_gif = os.getenv("USE_ANIMATED_GIF", "false").lower() in ("true", "1", "yes")
 
     if use_animated_gif:
-        from linkedin_generation.social.image_providers import AnimatedGIFProvider
+        # base_provider is already wrapped with AnimatedGIFProvider by ensure_image_provider.
+        # Do NOT re-wrap here — that creates a nested AnimatedGIFProvider that generates N×N frames.
         logging.info("Animated GIF mode enabled - generating multi-frame animation")
-
-        # Wrap base provider with AnimatedGIFProvider
-        num_frames = int(os.getenv("GIF_NUM_FRAMES", "6"))
-        frame_duration = int(os.getenv("GIF_FRAME_DURATION", "1000"))
-
-        gif_provider = AnimatedGIFProvider(
-            base_provider=base_provider,
-            num_frames=num_frames,
-            frame_duration=frame_duration
-        )
-
         try:
-            image_payload = gif_provider.get_image(
+            image_payload = base_provider.get_image(
                 prompt=prompt,
                 target_dir=target_dir,
                 alt_text=alt_text,

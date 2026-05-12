@@ -1,0 +1,9 @@
+[
+  {"name": "New Year's Day", "start_date": "2025-01-01", "end_date": "2025-01-03"},
+  {"name": "Spring Festival", "start_date": "2025-01-29", "end_date": "2025-02-04"},
+  {"name": "Qingming Festival", "start_date": "2025-04-04", "end_date": "2025-04-06"},
+  {"name": "Labour Day", "start_date": "2025-05-01", "end_date": "2025-05-05"},
+  {"name": "Dragon Boat Festival", "start_date": "2025-05-31", "end_date": "2025-06-02"},
+  {"name": "Mid-Autumn Festival", "start_date": "2025-10-06", "end_date": "2025-10-08"},
+  {"name": "National Day", "start_date": "2025-10-01", "end_date": "2025-10-07"}
+]

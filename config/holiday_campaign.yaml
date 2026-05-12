@@ -1,0 +1,17 @@
+defaults:
+  tone: "Warm, sincere celebration acknowledging partners across Italy and China."
+  hashtags:
+    - "#TNTMotion"
+    - "#HolidayGreetings"
+    - "#GlobalPartners"
+
+holiday_post_template:
+  headline: "Seasonal greetings from TNT Motion"
+  body: "TNT Motion wishes our partners a joyful holiday filled with reliable performance and lasting partnerships."
+  cta: "Reach out to our team after the break to plan your 2025 projects."
+  image_prompt: "Festive industrial imagery blending Italian and Chinese cultural elements, cinematic lighting"
+  alt_text: "Holiday greeting featuring TNT Motion branding with Italian and Chinese motifs"
+
+calendars:
+  italy: "config/holidays/italy_2025.json"
+  china: "config/holidays/china_2025.json"

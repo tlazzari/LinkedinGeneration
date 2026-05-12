@@ -244,10 +244,11 @@ class GoogleImagenProvider:
     """Generate imagery or video via Google Imagen/Veo models."""
 
     IMAGE_MODEL = "imagen-4.0-generate-001"
-    VIDEO_MODEL = "veo-1.5-001"
+    VIDEO_MODEL = "veo-2.0-generate-001"
     GOOGLE_VEO_ENDPOINT = (
-        "https://generativelanguage.googleapis.com/v1beta/models/veo-1.5-001:generateVideo"
+        "https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:predictLongRunning"
     )
+    GOOGLE_VEO_POLL_BASE = "https://generativelanguage.googleapis.com/v1beta/"
 
     def __init__(self, config: ImageProviderConfig) -> None:
         api_key = (
@@ -359,75 +360,85 @@ class GoogleImagenProvider:
 
         response = self._generate_video_via_rest(prompt_text)
 
-        videos = response.get("videos") or []
-        if not videos:
-            raise RuntimeError("Veo REST response did not include videos")
+        # Veo 2.0 response format:
+        # response.generateVideoResponse.generatedSamples[].video.uri
+        gen_resp = response.get("generateVideoResponse") or {}
+        samples = gen_resp.get("generatedSamples") or []
+        if not samples:
+            raise RuntimeError("Veo 2.0 response did not include generatedSamples")
 
-        video_entry = videos[0]
-        download_url = (
-            video_entry.get("videoUri")
-            or video_entry.get("uri")
-            or video_entry.get("gcsUri")
-            or video_entry.get("video_url")
-        )
-        target_dir.mkdir(parents=True, exist_ok=True)
+        video_entry = samples[0].get("video", {})
+        download_url = video_entry.get("uri") or video_entry.get("videoUri")
+        if not download_url:
+            raise RuntimeError("Veo 2.0 sample did not include a video URI")
 
-        if download_url:
-            content = self._download_video(download_url)
-            filename = video_entry.get("fileName") or f"veo_{response.get('responseId', 'asset')}.mp4"
-            path = target_dir / filename
-            path.write_bytes(content)
-            return path
+        # Append API key for download authentication
+        if "key=" not in download_url:
+            sep = "&" if "?" in download_url else "?"
+            download_url = f"{download_url}{sep}key={self._api_key}"
 
-        inline_payload = (
-            video_entry.get("inlineData")
-            or video_entry.get("inline_data")
-            or video_entry.get("data")
-        )
-        if inline_payload:
-            inline_bytes = self._extract_binary(inline_payload, kind="video")
-            filename = video_entry.get("fileName") or f"veo_{response.get('responseId', 'asset')}.mp4"
-            path = target_dir / filename
-            path.write_bytes(inline_bytes)
-            return path
-
-        raise RuntimeError("Veo REST response did not include a downloadable video")
+        import time as _time
+        content = self._download_video(download_url)
+        filename = f"veo2_{int(_time.time())}.mp4"
+        path = target_dir / filename
+        path.write_bytes(content)
+        return path
 
     # --- Internal helpers -------------------------------------------------
 
     def _generate_video_via_rest(self, prompt: str) -> dict[str, Any]:
+        """Submit a Veo 2.0 predictLongRunning job and poll until done (up to 5 min)."""
+        import time as _time
         params = {"key": self._api_key}
         endpoint = os.getenv("GOOGLE_VEO_ENDPOINT", self.GOOGLE_VEO_ENDPOINT)
-        payload: Dict[str, Any] = {
-            "prompt": {
-                "text": prompt,
-            }
-        }
-        if self.config.style_hint:
-            payload["style"] = {"text": self.config.style_hint}
 
-        response = requests.post(
-            endpoint,
-            params=params,
-            json=payload,
-            timeout=180,
-        )
-        if response.status_code >= 500:
-            raise RuntimeError(f"Google Veo service unavailable ({response.status_code})")
+        # Veo 2.0 uses instances/parameters format
+        payload: Dict[str, Any] = {
+            "model": "models/veo-2.0-generate-001",
+            "instances": [{"prompt": prompt}],
+            "parameters": {
+                "aspectRatio": "16:9",
+                "durationSeconds": 8,
+            },
+        }
+
+        # Submit long-running operation
+        response = requests.post(endpoint, params=params, json=payload, timeout=60)
         if response.status_code >= 400:
             logger.error("Google Veo error (%s): %s", response.status_code, response.text[:500])
             response.raise_for_status()
 
         try:
-            data = response.json()
+            op = response.json()
         except ValueError as exc:
             raise RuntimeError("Google Veo returned non-JSON payload") from exc
 
-        return data
+        op_name = op.get("name")
+        if not op_name:
+            raise RuntimeError(f"Veo did not return an operation name: {op}")
+
+        # Poll until done (up to 5 minutes, 10s intervals)
+        poll_base = os.getenv("GOOGLE_VEO_POLL_BASE", self.GOOGLE_VEO_POLL_BASE)
+        poll_url = f"{poll_base}{op_name}"
+        max_wait = 300
+        interval = 10
+        elapsed = 0
+        while elapsed < max_wait:
+            _time.sleep(interval)
+            elapsed += interval
+            poll_resp = requests.get(poll_url, params=params, timeout=30)
+            poll_resp.raise_for_status()
+            op_data = poll_resp.json()
+            if op_data.get("done"):
+                return op_data.get("response", {})
+            logger.info("Veo 2.0 operation in progress... (%ds elapsed)", elapsed)
+
+        raise RuntimeError(f"Veo 2.0 operation timed out after {max_wait}s")
+
 
     def _download_video(self, url: str) -> bytes:
         try:
-            response = requests.get(url, timeout=180)
+            response = requests.get(url, timeout=180, allow_redirects=True)
             response.raise_for_status()
             return response.content
         except requests.RequestException as exc:
