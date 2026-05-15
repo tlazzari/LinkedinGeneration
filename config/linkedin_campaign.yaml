@@ -239,3 +239,51 @@ content_pillars:
     hybrid bearing cross-section, or turbine shaft assembly — on a machined steel surface under
     dramatic directional lighting that reveals metallic texture and engineering tolerances. No text,
     no logos, no labels anywhere in the image.
+- name: 'Workholding Precision: Collets, Pull Studs & Morse Tapers'
+  target_client: >
+    CNC machining centre operators, toolroom managers, spindle repair technicians, and
+    OEM machine-tool manufacturers who specify the interface between spindle and cutting
+    tool — where every micron of runout costs them surface finish, tool life, and cycle time.
+  angle: >
+    Expose the workholding stack: the three components between spindle and cutting edge —
+    the pull stud that locks into the drawbar, the collet that grips the tool shank, and
+    the Morse taper that centres it all. Each post zooms into one component. Use specific
+    tolerances, failure modes, and application pairings. Open with the consequence of getting
+    it wrong: "0.01 mm of collet runout at 18,000 rpm adds 0.03 mm to your tool deflection —
+    and kills your insert in 20 minutes." Make engineers feel the engineering.
+  proof_points:
+  - 'ER collet series (ER8–ER50): runout ±0.005 mm standard, ±0.003 mm HP grade — the difference
+    that separates finishing passes from rework. HP grade required above 12,000 rpm on aluminium
+    and hardened steel'
+  - 'Pull studs (拉钉) — DIN69872, ISO 7388/2B, MAS403 BT, JIS B6339: the one component most
+    machinists never inspect. A worn or mismatched stud loses drawbar clamping force by up to 30%,
+    causing micro-slip at the spindle taper and destroying both the stud and the holder'
+  - 'Morse taper with tang (MT1–MT6, with drive key): positive rotational lock for drilling and
+    boring on non-powered quills — tang transfers torque, taper centres. Critical: tang must be
+    intact and the drift-slot geometry matched to the machine; a chipped tang causes eccentric thrust'
+  - 'Morse taper without tang (plain taper): friction-only drive — correct for powered spindles
+    where the taper is held in compression. Fitted with a drawbar bolt through the shank. Zero
+    tang wear, but requires correct drawbar tension: under-tension causes taper fretting, over-tension
+    cracks the quill'
+  - 'Internal coolant collets (ERC series, rated to 120 BAR): pressurised coolant delivered 2 mm
+    from the cutting edge. In titanium and stainless steel interrupted cuts, ERC collets reduce
+    tool temperature by 40–60°C versus flood cooling — extending CBN insert life by 2–3x'
+  - 'Collet sets (ER8 to ER50 full range): matching the collet series to spindle taper and max
+    shank diameter is step one. Mixing ER25 collets into an ER32 chuck looks fine until you
+    try to close — the nut seats on the collet OD, not the chuck bore, and the clamping angle
+    is wrong. We see this every month in returns'
+  ctas:
+  - What collet series runs in your machining centre? Tell us the rpm and we will spec the right grade
+  - Suspecting spindle runout? The pull stud is the first thing to check — DM us for a free checklist
+  - Tag a toolroom engineer who specifies their own workholding
+  hashtags:
+  - '#CNCMachining'
+  - '#Workholding'
+  - '#Collets'
+  - '#MorseTaper'
+  - '#ToolholderPrecision'
+  image_prompt: >
+    Macro studio photography of CNC workholding components arranged on a precision granite surface:
+    an ER collet open and closed, a pull stud showing the threaded shank, and a Morse taper with
+    visible tang drive slot — dramatic raking side-light that catches every machined surface and
+    thread, deep shadow background, no text, no labels, hyper-real metallic texture.
