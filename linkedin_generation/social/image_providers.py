@@ -244,9 +244,9 @@ class GoogleImagenProvider:
     """Generate imagery or video via Google Imagen/Veo models."""
 
     IMAGE_MODEL = "imagen-4.0-generate-001"
-    VIDEO_MODEL = "veo-2.0-generate-001"
+    VIDEO_MODEL = "veo-3.1-generate-preview"
     GOOGLE_VEO_ENDPOINT = (
-        "https://generativelanguage.googleapis.com/v1beta/models/veo-2.0-generate-001:predictLongRunning"
+        "https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning"
     )
     GOOGLE_VEO_POLL_BASE = "https://generativelanguage.googleapis.com/v1beta/"
 
@@ -372,10 +372,7 @@ class GoogleImagenProvider:
         if not download_url:
             raise RuntimeError("Veo 2.0 sample did not include a video URI")
 
-        # Append API key for download authentication
-        if "key=" not in download_url:
-            sep = "&" if "?" in download_url else "?"
-            download_url = f"{download_url}{sep}key={self._api_key}"
+        # API key is passed via x-goog-api-key header in _download_video
 
         import time as _time
         content = self._download_video(download_url)
@@ -387,23 +384,24 @@ class GoogleImagenProvider:
     # --- Internal helpers -------------------------------------------------
 
     def _generate_video_via_rest(self, prompt: str) -> dict[str, Any]:
-        """Submit a Veo 2.0 predictLongRunning job and poll until done (up to 5 min)."""
+        """Submit a Veo predictLongRunning job and poll until done (up to 5 min)."""
         import time as _time
-        params = {"key": self._api_key}
+        headers = {
+            "x-goog-api-key": self._api_key,
+            "Content-Type": "application/json",
+        }
         endpoint = os.getenv("GOOGLE_VEO_ENDPOINT", self.GOOGLE_VEO_ENDPOINT)
 
-        # Veo 2.0 uses instances/parameters format
+        # Veo REST format: model in URL only, not in body
         payload: Dict[str, Any] = {
-            "model": "models/veo-2.0-generate-001",
             "instances": [{"prompt": prompt}],
             "parameters": {
                 "aspectRatio": "16:9",
-                "durationSeconds": 8,
             },
         }
 
         # Submit long-running operation
-        response = requests.post(endpoint, params=params, json=payload, timeout=60)
+        response = requests.post(endpoint, headers=headers, json=payload, timeout=60)
         if response.status_code >= 400:
             logger.error("Google Veo error (%s): %s", response.status_code, response.text[:500])
             response.raise_for_status()
@@ -426,19 +424,20 @@ class GoogleImagenProvider:
         while elapsed < max_wait:
             _time.sleep(interval)
             elapsed += interval
-            poll_resp = requests.get(poll_url, params=params, timeout=30)
+            poll_resp = requests.get(poll_url, headers=headers, timeout=30)
             poll_resp.raise_for_status()
             op_data = poll_resp.json()
             if op_data.get("done"):
                 return op_data.get("response", {})
-            logger.info("Veo 2.0 operation in progress... (%ds elapsed)", elapsed)
+            logger.info("Veo operation in progress... (%ds elapsed)", elapsed)
 
-        raise RuntimeError(f"Veo 2.0 operation timed out after {max_wait}s")
+        raise RuntimeError(f"Veo operation timed out after {max_wait}s")
 
 
     def _download_video(self, url: str) -> bytes:
         try:
-            response = requests.get(url, timeout=180, allow_redirects=True)
+            headers = {"x-goog-api-key": self._api_key}
+            response = requests.get(url, headers=headers, timeout=180, allow_redirects=True)
             response.raise_for_status()
             return response.content
         except requests.RequestException as exc:

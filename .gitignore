@@ -23,3 +23,4 @@ venv/
 # Generated post output (content + large image/video files)
 linkedin_generation/linkedin_posts/
 linkedin_generation/seta_posts/
+image_providers.py.bak.*

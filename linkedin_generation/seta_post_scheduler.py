@@ -271,7 +271,7 @@ def generate_video_for_post(
     try:
         provider_cfg = ImageProviderConfig(
             provider="google",
-            model="veo-2.0-generate-001",
+            model="veo-3.1-generate-preview",
             size="1920x1080",
         )
         google_provider = GoogleImagenProvider(provider_cfg)
