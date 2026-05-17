@@ -1,0 +1,18 @@
+defaults:
+  tone: "Professional, warm. Acknowledge partners across China and Europe."
+  hashtags:
+    - "#SetaCapital"
+    - "#CrossBorderMA"
+    - "#HolidayGreetings"
+
+holiday_post_template:
+  name: "Holiday Greeting"
+  headline: "Season's greetings from Seta Capital"
+  body: "Seta Capital wishes our partners and collaborators across China and Europe a joyful holiday. We look forward to supporting your cross-border ambitions in the year ahead."
+  cta: "Reach out to discuss your next cross-border opportunity."
+  image_prompt: "Elegant professional holiday image blending Chinese and European cultural elements, golden tones, corporate style, cinematic lighting"
+  alt_text: "Holiday greeting from Seta Capital with Chinese and European motifs"
+
+calendars:
+  italy: "config/holidays/italy_2025.json"
+  china: "config/holidays/china_2025.json"

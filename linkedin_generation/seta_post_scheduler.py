@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import yaml
 import logging
 import os
 import requests
@@ -31,6 +32,8 @@ from linkedin_generation.social.image_providers import (
 )
 from linkedin_generation.social.news_search import fetch_article_preview_image
 from linkedin_generation.social.seta_chart_generator import generate_market_chart, CHART_TYPES
+from linkedin_generation.holiday.calendars import load_calendars
+from linkedin_generation.holiday.scheduler import HolidayAwareScheduler
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CAMPAIGN_CONFIG = Path(os.path.expanduser("~/seta_linkedin_campaign.yaml"))
@@ -122,6 +125,17 @@ def parse_args() -> argparse.Namespace:
         "--run-once",
         action="store_true",
         help="Generate a single post immediately instead of running the scheduler",
+    )
+    parser.add_argument(
+        "--daily",
+        action="store_true",
+        help="Run holiday-aware daily logic (posts on Tue/Thu or holidays, skips otherwise)",
+    )
+    parser.add_argument(
+        "--holiday-config",
+        type=Path,
+        default=Path(os.getenv("SETA_HOLIDAY_CONFIG", str(PROJECT_ROOT / "config" / "seta_holiday_campaign.yaml"))),
+        help="Path to holiday-aware configuration",
     )
     parser.add_argument(
         "--publish",
@@ -546,6 +560,153 @@ def build_scheduled_job(
     return job
 
 
+def load_seta_holiday_config(path: Path) -> dict:
+    """Load Seta-specific holiday config (same format as TNT)."""
+    if not path.exists():
+        raise FileNotFoundError(f"Holiday config not found: {path}")
+    data = yaml.safe_load(path.read_text()) or {}
+    calendars = {}
+    for key, value in (data.get("calendars") or {}).items():
+        calendars[key] = (PROJECT_ROOT / value).resolve()
+
+    template = data.get("holiday_post_template", {})
+    pillar = PostPillar(
+        name=template.get("name", "Holiday Greeting"),
+        target_client=template.get("target_client", "Global partners"),
+        angle=template.get("headline", "Season's greetings from Seta Capital"),
+        proof_points=[template.get("body", "")],
+        ctas=[template.get("cta", "")],
+        hashtags=data.get("defaults", {}).get("hashtags", ["#SetaCapital"]),
+        image_prompt=template.get("image_prompt"),
+    )
+
+    return {"calendars": calendars, "holiday_pillar": pillar}
+
+
+def seta_daily_runner(
+    *,
+    campaign: CampaignConfig,
+    generator: SetaLinkedInPostGenerator,
+    output_dir: Path,
+    publisher: Optional[LinkedInPublisher],
+    holiday_config: Path,
+) -> None:
+    """Holiday-aware daily runner for Seta Capital.
+
+    Runs every day. Posts on regular schedule days (Tue/Thu) or on holiday eves.
+    Skips all other days.
+    """
+    logging.info("Starting Seta Capital daily holiday-aware run")
+
+    config = load_seta_holiday_config(holiday_config)
+    calendars = load_calendars(config["calendars"])
+    holiday_pillar = config["holiday_pillar"]
+    tz = ZoneInfo(campaign.timezone)
+    today = datetime.now(tz=tz).date()
+
+    scheduler = HolidayAwareScheduler(
+        campaign=campaign,
+        generator=generator,
+        calendars=calendars,
+        holiday_pillar=holiday_pillar,
+        state_path=output_dir / "seta_holiday_state.json",
+    )
+
+    decision = scheduler.evaluate_day(today)
+    logging.info("Decision for %s: %s", today, decision)
+
+    if not decision.should_post:
+        logging.info("Skipping post today: %s", decision.reason)
+        return
+
+    if decision.reason == "holiday" and decision.holiday:
+        logging.info("Holiday detected: %s — generating holiday post", decision.holiday.name)
+        # For holiday posts, temporarily override pillar selection
+        # by injecting the holiday pillar into the campaign
+        # We reuse run_single_generation but swap the pillar via rotation state
+        # Simple approach: just run with the holiday pillar directly
+        _run_holiday_post(
+            campaign=campaign,
+            generator=generator,
+            holiday_pillar=holiday_pillar,
+            holiday=decision.holiday,
+            output_dir=output_dir,
+            publisher=publisher,
+        )
+    else:
+        # Regular Tue/Thu post
+        run_single_generation(
+            campaign=campaign,
+            generator=generator,
+            output_dir=output_dir,
+            publisher=publisher,
+        )
+
+
+def _run_holiday_post(
+    *,
+    campaign: CampaignConfig,
+    generator: SetaLinkedInPostGenerator,
+    holiday_pillar: PostPillar,
+    holiday,
+    output_dir: Path,
+    publisher: Optional[LinkedInPublisher],
+) -> None:
+    """Generate and publish a holiday-specific post."""
+    tz = ZoneInfo(campaign.timezone)
+    scheduled_for = datetime.now(tz=tz)
+
+    post = generator.generate(
+        pillar=holiday_pillar,
+        scheduled_for=scheduled_for,
+        post_type="holiday",
+        image_mode="photo",
+    )
+
+    images_dir = output_dir / "images"
+    try:
+        image_payload = generate_image_for_post(
+            campaign=campaign,
+            post=post,
+            target_dir=images_dir,
+        )
+    except Exception as e:
+        logging.error("Holiday image generation failed: %s", e)
+        image_payload = ImagePayload(provider="none", alt_text=post.alt_text)
+
+    extra_metadata = {
+        "pillar": holiday_pillar.name,
+        "post_type": "holiday",
+        "holiday_name": holiday.name,
+        "decision_reason": "holiday",
+    }
+
+    if publisher:
+        local_image_path = ensure_local_image_file(
+            image=image_payload,
+            fallback_dir=images_dir,
+            timestamp=scheduled_for,
+        )
+        publish_result = publisher.publish_post(
+            text=post.as_text,
+            headline=post.headline,
+            alt_text=post.alt_text,
+            image_path=local_image_path,
+        )
+        if publish_result.get("share_urn"):
+            extra_metadata["linkedin_share_urn"] = publish_result["share_urn"]
+            logging.info("Published holiday post to LinkedIn: %s", publish_result["share_urn"])
+
+    metadata_path = save_artifacts(
+        output_dir=output_dir,
+        post=post,
+        image=image_payload,
+        extra_metadata=extra_metadata,
+    )
+    logging.info("Saved holiday post artefacts to %s", metadata_path)
+
+
+
 def main() -> None:
     load_dotenv()
     args = parse_args()
@@ -591,6 +752,16 @@ def main() -> None:
     # Ensure output directory
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.daily:
+        seta_daily_runner(
+            campaign=campaign,
+            generator=generator,
+            output_dir=output_dir,
+            publisher=publisher,
+            holiday_config=args.holiday_config,
+        )
+        return
 
     if args.run_once:
         run_single_generation(
