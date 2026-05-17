@@ -13,9 +13,7 @@ from typing import Any, Dict, Iterable, Optional, Protocol, Sequence
 
 from openai import OpenAI
 import requests
-import google.generativeai as genai
-from google.generativeai import GenerativeModel
-from google import genai as google_genai
+from google import genai
 
 
 from linkedin_generation.social.logo_overlay import add_logo_to_image
@@ -262,9 +260,7 @@ class GoogleImagenProvider:
             )
         self.config = config
         self._api_key = api_key
-        genai.configure(api_key=api_key)
-        # Use new google.genai client for Imagen
-        self._genai_client = google_genai.Client(api_key=api_key)
+        self._genai_client = genai.Client(api_key=api_key)
         self._video_model = None  # Veo handled via REST
 
     def _apply_style(self, prompt: str) -> str:
