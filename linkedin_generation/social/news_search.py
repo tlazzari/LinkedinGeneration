@@ -263,10 +263,10 @@ Return ONLY valid JSON array, no other text."""
         return results
 
     except json_module.JSONDecodeError as e:
-        logger.error(f"Failed to parse Gemini search response as JSON: {e}")
+        logger.warning(f"Failed to parse Gemini search response as JSON (returning empty): {e}")
         return []
     except Exception as e:
-        logger.error(f"Gemini search failed: {e}")
+        logger.warning(f"Gemini search failed (returning empty): {e}")
         return []
 
 

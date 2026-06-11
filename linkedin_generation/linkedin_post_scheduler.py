@@ -240,7 +240,7 @@ def maybe_run_biweekly_site_updates() -> None:
             timeout=120,
         )
     except subprocess.TimeoutExpired:
-        logging.error("Site update pipeline timed out after 120s — skipping to avoid blocking posts")
+        logging.warning("Site update pipeline timed out after 120s — skipping to avoid blocking posts")
         return
     except subprocess.CalledProcessError as exc:
         logging.error("Site update pipeline failed with exit code %s", exc.returncode)
