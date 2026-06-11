@@ -474,7 +474,7 @@ def run_single_generation(
             )
         except Exception as e:
             logging.error(f"Image generation failed: {e}")
-            image_payload = ImagePayload(provider="none", alt_text=post.alt_text)
+            image_payload = ImagePayload(prompt="", provider="none", alt_text=post.alt_text)
 
     # Publish if configured
     extra_metadata: Dict[str, str] = {
@@ -513,7 +513,7 @@ def run_single_generation(
             logging.info(f"Published to LinkedIn: {publish_result['share_urn']}")
 
     # Save artifacts
-    used_image = image_payload or ImagePayload(provider="none", alt_text=post.alt_text)
+    used_image = image_payload or ImagePayload(prompt="", provider="none", alt_text=post.alt_text)
     if video_path:
         extra_metadata["video_file"] = video_path.name
     metadata_path = save_artifacts(
@@ -672,7 +672,7 @@ def _run_holiday_post(
         )
     except Exception as e:
         logging.error("Holiday image generation failed: %s", e)
-        image_payload = ImagePayload(provider="none", alt_text=post.alt_text)
+        image_payload = ImagePayload(prompt="", provider="none", alt_text=post.alt_text)
 
     extra_metadata = {
         "pillar": holiday_pillar.name,
