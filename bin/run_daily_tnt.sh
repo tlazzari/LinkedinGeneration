@@ -12,3 +12,4 @@ PYTHON_BIN=${PYTHON_BIN:-"/opt/venv/bin/python"}
 [ -x "$PYTHON_BIN" ] || { echo "$(date -Is) ERROR python not found at $PYTHON_BIN" >>"$LOG_FILE"; exit 1; }
 [ -f "$project_dir/.env" ] && { set -a; source "$project_dir/.env"; set +a; }
 PYTHONPATH="$project_dir:$seo_dir:$commonlib_dir" "$PYTHON_BIN" linkedin_generation/linkedin_post_scheduler.py --daily "$@" >>"$LOG_FILE" 2>&1
+touch "$project_dir/logs/tnt_linkedin_daily.log"
