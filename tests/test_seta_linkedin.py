@@ -135,7 +135,7 @@ bin_script = PROJECT_ROOT / 'bin' / 'run_daily_seta.sh'
 t.check('run_daily_seta.sh exists',      bin_script.is_file())
 t.check('run_daily_seta.sh executable',  os.access(bin_script, os.X_OK))
 t.check('run_daily_seta.sh syntax',      bash_n_ok(bin_script))
-t.check('script references --run-once',  '--run-once' in bin_script.read_text())
+t.check('script references --daily',     '--daily' in bin_script.read_text())
 t.check('script sets PYTHONPATH',        'PYTHONPATH' in bin_script.read_text())
 
 
@@ -169,19 +169,17 @@ t.check(
     'payload.get("image_prompt") or pillar.image_prompt' not in gen_src,
 )
 
-# === RULE: Seta cron fires Tue/Thu only (not daily) ===
+# === RULE: Seta cron uses --daily flag (not --run-once) for Tue/Thu enforcement ===
 import subprocess
 crontab = subprocess.run(['crontab', '-l'], capture_output=True, text=True).stdout
 seta_lines = [l for l in crontab.splitlines() if 'run_daily_seta.sh' in l and not l.strip().startswith('#')]
 t.check('RULE: Seta cron entry exists', len(seta_lines) >= 1)
-if seta_lines:
-    seta_line = seta_lines[0]
-    t.check('RULE: Seta cron fires on Tue/Thu only (day field is 2,4)',
-            '* * 2,4 ' in seta_line,
-            detail=f'Got: {seta_line[:60]}')
-    t.check('RULE: Seta cron does NOT fire on all days (must not be "* * *")',
-            not seta_line.startswith('0 6 * * * '),
-            detail='Daily cron would post every day, not just Tue/Thu')
+run_script = PROJECT_ROOT / 'bin' / 'run_daily_seta.sh'
+if run_script.is_file():
+    script_src = run_script.read_text()
+    t.check('RULE: run_daily_seta.sh uses --daily flag (not --run-once)',
+            '--daily' in script_src and '--run-once' not in script_src,
+            detail='--run-once bypasses Tue/Thu check; must use --daily')
 
 
 # === RULE: animated GIF must be enabled (no static images for non-Veo pillars) ===
