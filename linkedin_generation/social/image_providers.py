@@ -552,12 +552,13 @@ class GeminiImageProvider:
                 error_data = e.response.json()
                 error_msg = error_data.get("error", {}).get("message", str(e))
             except:
-                pass
+                error_msg = re.sub(r'[?&]key=[^&\s]+', '?key=REDACTED', str(e))
             logger.error(f"Gemini API error: {error_msg}")
             raise RuntimeError(f"Gemini image generation failed: {error_msg}") from e
         except Exception as exc:
-            logger.error(f"Gemini image generation failed: {exc}")
-            raise RuntimeError(f"Gemini image generation failed: {exc}") from exc
+            safe_msg = re.sub(r'[?&]key=[^&\s]+', '?key=REDACTED', str(exc))
+            logger.error(f"Gemini image generation failed: {safe_msg}")
+            raise RuntimeError(f"Gemini image generation failed: {safe_msg}") from exc
 
 
 def create_image_provider(config: ImageProviderConfig) -> ImageProvider:

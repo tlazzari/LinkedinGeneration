@@ -266,7 +266,8 @@ Return ONLY valid JSON array, no other text."""
         logger.warning(f"Failed to parse Gemini search response as JSON (returning empty): {e}")
         return []
     except Exception as e:
-        logger.warning(f"Gemini search failed (returning empty): {e}")
+        safe_msg = re.sub(r"[?&]key=[^&\s]+", "?key=REDACTED", str(e))
+        logger.warning(f"Gemini search failed (returning empty): {safe_msg}")
         return []
 
 
