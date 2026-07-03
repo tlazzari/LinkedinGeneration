@@ -13,5 +13,5 @@ holiday_post_template:
   alt_text: "Holiday greeting featuring TNT Motion branding with Italian and Chinese motifs"
 
 calendars:
-  italy: "config/holidays/italy_2025.json"
-  china: "config/holidays/china_2025.json"
+  italy: "config/holidays/italy_2026.json"
+  china: "config/holidays/china_2026.json"

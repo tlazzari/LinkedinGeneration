@@ -279,24 +279,28 @@ def choose_pillar(
     state = CampaignState.load(state_path)
     total = len(campaign.pillars)
 
-    if planned_post_type == "promotional":
+    has_promo = any(p.name == PROMOTIONAL_PILLAR_NAME for p in campaign.pillars)
+
+    # Only pin to a dedicated promotional pillar if one actually exists in the
+    # config. When it does not (current TNT config has 6 content pillars and no
+    # "Promotional Impact"), promotional turns must ALSO advance the rotation —
+    # the old code reset last_pillar_index to 0 every promotional turn, so the
+    # rotation ping-ponged 0<->1 and pillars 2-5 never posted.
+    if planned_post_type == "promotional" and has_promo:
         for idx, pillar in enumerate(campaign.pillars):
             if pillar.name == PROMOTIONAL_PILLAR_NAME:
                 state.last_pillar_index = idx
                 state.save(state_path)
                 return pillar
-        # fallback to first pillar if promotional not present
-        state.last_pillar_index = 0
-        state.save(state_path)
-        return campaign.pillars[0]
 
-    # technical rotation: skip promotional pillar
+    # Rotate through content pillars, skipping the promotional one if present.
     for _ in range(total):
         idx = state.next_index(total)
         candidate = campaign.pillars[idx]
-        if candidate.name != PROMOTIONAL_PILLAR_NAME:
-            state.save(state_path)
-            return candidate
+        if has_promo and candidate.name == PROMOTIONAL_PILLAR_NAME:
+            continue
+        state.save(state_path)
+        return candidate
 
     # fallback
     state.last_pillar_index = 0

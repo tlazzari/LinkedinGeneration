@@ -14,5 +14,5 @@ holiday_post_template:
   alt_text: "Holiday greeting from Seta Capital with Chinese and European motifs"
 
 calendars:
-  italy: "config/holidays/italy_2025.json"
-  china: "config/holidays/china_2025.json"
+  italy: "config/holidays/italy_2026.json"
+  china: "config/holidays/china_2026.json"

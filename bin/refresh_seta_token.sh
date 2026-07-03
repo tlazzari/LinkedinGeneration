@@ -39,9 +39,14 @@ RESPONSE=$(curl -s -X POST 'https://www.linkedin.com/oauth/v2/accessToken' \
 
 NEW_TOKEN=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['access_token'])" 2>/dev/null || true)
 EXPIRES_IN=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['expires_in'])" 2>/dev/null || true)
+# LinkedIn may rotate the refresh_token; capture it so the NEXT refresh (weeks
+# later) does not fail using a stale one.
+NEW_REFRESH=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('refresh_token',''))" 2>/dev/null || true)
 
 if [ -z "$NEW_TOKEN" ]; then
-  log "ERROR: Token refresh failed — response: $RESPONSE"
+  # Do not log the raw response — it can contain token material. Log only the error field.
+  ERR=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('error','')+': '+d.get('error_description',''))" 2>/dev/null || echo "unparseable response")
+  log "ERROR: Token refresh failed — $ERR"
   exit 1
 fi
 
@@ -51,5 +56,9 @@ NEW_EXPIRY=$(date -d "+$((EXPIRES_IN / 86400)) days" +%Y-%m-%d)
 # Update .env
 sed -i "s|^SETA_LINKEDIN_ACCESS_TOKEN=.*|SETA_LINKEDIN_ACCESS_TOKEN=${NEW_TOKEN}|" "$ENV_FILE"
 sed -i "s|^SETA_LINKEDIN_TOKEN_EXPIRY=.*|SETA_LINKEDIN_TOKEN_EXPIRY=${NEW_EXPIRY}|" "$ENV_FILE"
+if [ -n "$NEW_REFRESH" ]; then
+  sed -i "s|^SETA_LINKEDIN_REFRESH_TOKEN=.*|SETA_LINKEDIN_REFRESH_TOKEN=${NEW_REFRESH}|" "$ENV_FILE"
+  log "Refresh token rotated — updated SETA_LINKEDIN_REFRESH_TOKEN in .env"
+fi
 
 log "Token refreshed successfully. New expiry: $NEW_EXPIRY"

@@ -1,0 +1,38 @@
+[
+  {
+    "name": "New Year's Day",
+    "start_date": "2026-01-01",
+    "end_date": "2026-01-01",
+    "locale": "china"
+  },
+  {
+    "name": "Chinese New Year (Spring Festival)",
+    "start_date": "2026-02-17",
+    "end_date": "2026-02-17",
+    "locale": "china"
+  },
+  {
+    "name": "Labour Day",
+    "start_date": "2026-05-01",
+    "end_date": "2026-05-01",
+    "locale": "china"
+  },
+  {
+    "name": "Dragon Boat Festival",
+    "start_date": "2026-06-19",
+    "end_date": "2026-06-19",
+    "locale": "china"
+  },
+  {
+    "name": "Mid-Autumn Festival",
+    "start_date": "2026-09-25",
+    "end_date": "2026-09-25",
+    "locale": "china"
+  },
+  {
+    "name": "National Day",
+    "start_date": "2026-10-01",
+    "end_date": "2026-10-01",
+    "locale": "china"
+  }
+]

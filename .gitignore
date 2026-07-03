@@ -27,3 +27,4 @@ image_providers.py.bak.*
 .credentials.*
 *.key
 *.pem
+config/linkedin_token_state.json

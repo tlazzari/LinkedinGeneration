@@ -254,8 +254,6 @@ t.check('RULE: chart data injected as MANDATORY in prompt',
 t.check('RULE: chart post requires quoting specific numbers',
         'Quote at least TWO specific numbers' in gen_src2)
 
-sys.exit(t.summary())
-
 # === RULE: Seta LinkedIn access token must not be expiring within 14 days ===
 import datetime
 env_file = Path('/opt/linkedin/.env')
@@ -274,3 +272,5 @@ if expiry_val:
                 days_left > 14)
     except ValueError:
         t.check(f'RULE: SETA_LINKEDIN_TOKEN_EXPIRY is a valid date (got: {expiry_val!r})', False)
+
+sys.exit(t.summary())
