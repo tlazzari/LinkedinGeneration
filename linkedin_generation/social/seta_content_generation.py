@@ -197,9 +197,10 @@ class SetaLinkedInPostGenerator:
 
         if post_type == "promotional":
             post_directives = (
-                "- Focus on Seta Capital's value proposition and expertise.\n"
-                "- Highlight successful advisory outcomes or strategic insights.\n"
-                "- Close with a professional CTA inviting engagement."
+                "- BODY: deliver an authoritative strategic insight about cross-border M&A, "
+                "deal-making, or a specific industry vertical. Do NOT mention Seta Capital in the body.\n"
+                "- Speak as an expert operator sharing a point of view, not as a firm advertising itself.\n"
+                "- The Seta Capital connection belongs ONLY in the final paragraph (cta field)."
             )
         elif post_type == "technical":
             if news_context and pillar.use_news_search:
@@ -207,18 +208,21 @@ class SetaLinkedInPostGenerator:
             else:
                 url_directive = "- Do NOT include any external links or URLs in the post body — Seta Capital's expertise should speak for itself.\n"
             post_directives = (
-                "- Provide substantive analysis with specific data points.\n"
+                "- BODY: provide substantive analysis with specific data points. Do NOT mention "
+                "Seta Capital in the body — let the analysis itself demonstrate the expertise.\n"
                 "- Reference actual market trends, deals, or economic indicators.\n"
                 + url_directive
-                + "- Position Seta Capital as a knowledgeable thought leader."
+                + "- Write in a knowledgeable, authoritative thought-leader voice.\n"
+                + "- The Seta Capital connection belongs ONLY in the final paragraph (cta field)."
             )
         else:  # holiday
             image_hint = f"authentic celebrations of {holiday_name}"
             post_directives = (
                 f"- Headline must include '{holiday_name}' with a warm greeting.\n"
-                f"- Acknowledge partners and connections in {holiday_locale}.\n"
-                "- Keep copy warm and celebratory, briefly mentioning Seta Capital.\n"
-                "- Avoid overt business messaging."
+                f"- BODY: acknowledge partners and connections in {holiday_locale}; keep it warm and "
+                "celebratory. Do NOT mention Seta Capital in the body.\n"
+                "- Avoid overt business messaging.\n"
+                "- Sign off as Seta Capital ONLY in the final paragraph (cta field)."
             )
 
         # News-enhanced requirements
@@ -230,7 +234,7 @@ class SetaLinkedInPostGenerator:
                 "You MUST:\n"
                 "1. Reference at least ONE specific news item from above in your post\n"
                 "2. Include the FULL URL (e.g., https://www.bloomberg.com/...) in the post body\n"
-                "3. Provide Seta Capital's expert commentary on the news implications\n"
+                "3. Provide expert commentary on the news implications (in the body, WITHOUT naming Seta Capital — the firm is introduced only in the final paragraph)\n"
                 "4. Make the post feel timely and connected to current events\n"
                 "5. Format the link naturally in the text (e.g., 'Read more: [URL]' or 'Source: [URL]')\n"
             )
@@ -246,7 +250,7 @@ class SetaLinkedInPostGenerator:
                 "MANDATORY RULES for Market Intelligence posts:\n"
                 "1. Quote at least TWO specific numbers from the data above (e.g. EUR/CNY rate, GDP %, yield)\n"
                 "2. Explain what the movement means for cross-border M&A deal valuations or timing\n"
-                "3. Connect the data to Seta Capital's Europe-China advisory positioning\n"
+                "3. Keep the BODY brand-free — do NOT mention Seta Capital in the analysis; the Seta connection goes in the final paragraph (cta) only\n"
                 "4. Do NOT invent or estimate numbers — only use the figures provided above\n"
                 "5. Keep the tone analytical and authoritative — this is for CFOs and PE partners\n"
             )
@@ -300,13 +304,18 @@ class SetaLinkedInPostGenerator:
             f"{news_requirements}"
             f"{chart_requirements}"
             "\nOutput must be JSON with keys headline, body, cta, hashtags (list), image_prompt, video_prompt, alt_text.\n"
+            "POST STRUCTURE (mandatory, applies to every pillar):\n"
+            "- The post has TWO parts: (1) the BODY and (2) a single final paragraph in the 'cta' field.\n"
+            "- BODY = authoritative, expert analysis in a thought-leadership voice. It must NOT mention "
+            "Seta Capital, 'our firm', 'we', or any first-person brand reference. Pure insight only.\n"
+            "- cta = EXACTLY ONE short paragraph (2-3 sentences) — the ONLY place Seta Capital is named. "
+            "It ties the insight to Seta Capital's Europe-China M&A advisory and invites engagement.\n"
             "Constraints:\n"
-            "- Keep total length 150-250 words across headline + body + CTA.\n"
+            "- Keep total length 150-250 words across headline + body + cta.\n"
             "- Open with an attention-grabbing hook that feels timely and relevant.\n"
             "- Use professional, analytical language appropriate for C-suite readers.\n"
-            "- Mention Seta Capital once, naturally positioned.\n"
+            "- Seta Capital must appear ONLY in the cta paragraph, nowhere in headline or body.\n"
             "- NEVER include political commentary or negative remarks about any country.\n"
-            "- CTA should invite professional engagement (connect, discuss, explore).\n"
             "- Finish with 3-5 hashtags from this pool: "
             f"{hashtag_pool}.\n"
             f"{image_requirements}\n"
