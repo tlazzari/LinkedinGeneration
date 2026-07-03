@@ -100,4 +100,33 @@ t.check('run_daily_tnt.sh syntax',      bash_n_ok(bin_script))
 t.check('script references --daily',    '--daily' in bin_script.read_text())
 t.check('script sets PYTHONPATH',       'PYTHONPATH' in bin_script.read_text())
 
+# === Brand registry (social/brand.py) ===
+import sys as _sys
+_sys.path.insert(0, str(PKG_DIR.parent))
+try:
+    from linkedin_generation.social.brand import BRANDS, get_brand, Brand, register_brand
+    from linkedin_generation.social.base_content import BaseContentGenerator
+    _reg_ok = True
+except Exception as _e:
+    _reg_ok = False
+    t.check(f'brand registry imports (err: {_e})', False)
+
+if _reg_ok:
+    t.check('brand registry has tnt + seta', {'tnt', 'seta'} <= set(BRANDS))
+    for _k, _b in BRANDS.items():
+        t.check(f'brand "{_k}" key matches dict key', _b.key == _k)
+        t.check(f'brand "{_k}" generator subclasses BaseContentGenerator',
+                isinstance(_b.generator, type) and issubclass(_b.generator, BaseContentGenerator))
+        t.check(f'brand "{_k}" has capabilities', len(_b.capabilities) > 0)
+        _hc = (PKG_DIR.parent / _b.default_holiday_config)
+        t.check(f'brand "{_k}" holiday config exists ({_b.default_holiday_config})', _hc.is_file())
+    t.check('tnt uses logo_overlay capability', get_brand('tnt').has('logo_overlay'))
+    t.check('seta uses news + charts capabilities',
+            get_brand('seta').has('news') and get_brand('seta').has('charts'))
+    try:
+        get_brand('nope')
+        t.check('get_brand raises on unknown brand', False)
+    except KeyError:
+        t.check('get_brand raises on unknown brand', True)
+
 sys.exit(t.summary())

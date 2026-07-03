@@ -32,6 +32,7 @@ from linkedin_generation.social.image_providers import (
 )
 from linkedin_generation.social.news_search import fetch_article_preview_image
 from linkedin_generation.social.seta_chart_generator import generate_market_chart, CHART_TYPES
+from linkedin_generation.social.artifacts import slugify, save_artifacts
 from linkedin_generation.holiday.calendars import load_calendars
 from linkedin_generation.holiday.scheduler import HolidayAwareScheduler
 
@@ -296,51 +297,6 @@ def generate_video_for_post(
         logging.warning("Google Veo also failed — falling back to static image: %s", exc)
 
     return None
-
-
-def slugify(text: str) -> str:
-    clean = "".join(ch.lower() if ch.isalnum() else "-" for ch in text)
-    while "--" in clean:
-        clean = clean.replace("--", "-")
-    return clean.strip("-") or "post"
-
-
-def save_artifacts(
-    *,
-    output_dir: Path,
-    post: GeneratedPost,
-    image: ImagePayload,
-    extra_metadata: Optional[Dict[str, str]] = None,
-) -> Path:
-    timestamp = post.created_at.strftime("%Y%m%d_%H%M")
-    slug = slugify(post.pillar_name)
-    base_path = output_dir / f"{timestamp}_{slug}"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # Save post text
-    copy_path = base_path.with_suffix(".txt")
-    copy_path.write_text(post.as_text)
-
-    # Build metadata
-    metadata = post.as_mapping()
-    metadata["copy_file"] = copy_path.name
-
-    if image.path:
-        metadata["image_file"] = image.path.name
-    if image.url:
-        metadata["image_url"] = image.url
-    if image.provider:
-        metadata["image_provider"] = image.provider
-    if image.alt_text:
-        metadata["image_alt_text"] = image.alt_text
-
-    if extra_metadata:
-        metadata.update(extra_metadata)
-
-    metadata_path = base_path.with_suffix(".json")
-    metadata_path.write_text(json.dumps(metadata, indent=2))
-
-    return metadata_path
 
 
 def ensure_local_image_file(

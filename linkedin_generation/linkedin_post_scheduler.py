@@ -37,6 +37,7 @@ from linkedin_generation.social.linkedin_client import LinkedInPublisherConfig
 from linkedin_generation.holiday.calendars import load_calendars
 from linkedin_generation.holiday.scheduler import HolidayAwareScheduler
 from linkedin_generation.social.logo_overlay import add_logo_to_image
+from linkedin_generation.social.artifacts import slugify, save_artifacts
 # CRITICAL: Token auto-renewal - DO NOT REMOVE unless expressly commanded
 # This ensures LinkedIn tokens are automatically refreshed before expiration
 from linkedin_generation.token_manager import ensure_valid_token
@@ -390,51 +391,6 @@ def generate_image_with_fallback(
     )
     return image_payload, None
 
-def slugify(text: str) -> str:
-    clean = "".join(ch.lower() if ch.isalnum() else "-" for ch in text)
-    while "--" in clean:
-        clean = clean.replace("--", "-")
-    return clean.strip("-") or "post"
-
-
-def save_artifacts(
-    *,
-    post_output_dir: Path,
-    post,
-    image: ImagePayload,
-    extra_metadata: Optional[Dict[str, str]] = None,
-) -> Path:
-    timestamp = post.created_at.strftime("%Y%m%d_%H%M")
-    slug = slugify(post.pillar_name)
-    base_path = post_output_dir / f"{timestamp}_{slug}"
-    post_output_dir.mkdir(parents=True, exist_ok=True)
-
-    copy_path = base_path.with_suffix(".txt")
-    copy_path.write_text(post.as_text)
-
-    metadata = post.as_mapping()
-    metadata["copy_file"] = copy_path.name
-
-    if image.path:
-        metadata["image_file"] = image.path.name
-    if image.url:
-        metadata["image_url"] = image.url
-    if image.provider:
-        metadata["image_provider"] = image.provider
-    if image.prompt:
-        metadata["image_prompt"] = image.prompt
-    if image.alt_text:
-        metadata["image_alt_text"] = image.alt_text
-
-    if extra_metadata:
-        metadata.update(extra_metadata)
-
-    metadata_path = base_path.with_suffix(".json")
-    metadata_path.write_text(json.dumps(metadata, indent=2))
-
-    return metadata_path
-
-
 def daily_runner(
     *,
     campaign: CampaignConfig,
@@ -555,7 +511,7 @@ def daily_runner(
         extra_metadata["linkedin_asset"] = publish_result.get("asset", "")
 
     metadata_path = save_artifacts(
-        post_output_dir=campaign.output_dir,
+        output_dir=campaign.output_dir,
         post=post,
         image=image_payload,
         extra_metadata=extra_metadata,
@@ -704,7 +660,7 @@ def build_job(
             extra_metadata["linkedin_asset"] = publish_result.get("asset", "")
 
         metadata_path = save_artifacts(
-            post_output_dir=campaign.output_dir,
+            output_dir=campaign.output_dir,
             post=post,
             image=image_payload,
             extra_metadata=extra_metadata,
