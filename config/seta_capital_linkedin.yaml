@@ -1,0 +1,152 @@
+defaults:
+  tone: 'Professional, sophisticated, and authoritative tone that positions Seta Capital
+    as a trusted advisor in M&A and investment banking. Blend strategic insight with
+    approachable expertise. Content should reflect deep industry knowledge while maintaining
+    accessibility for diverse audiences.
+    '
+  hashtags:
+  - '#SetaCapital'
+  - '#MergersAndAcquisitions'
+  - '#InvestmentBanking'
+  - '#CorporateFinance'
+schedule:
+  timezone: Europe/Rome
+  slots:
+  - day: Tuesday
+    time: '10:00'
+  - day: Thursday
+    time: '15:00'
+image_provider:
+  provider: google-imagen
+  model: imagen-4.0-generate-001
+  size: 1080x1080
+  style_hint: 'Photorealistic corporate photography. Warm professional lighting.
+    Specific business context — advisors, executives, deal-making scenes. No text,
+    no logos, no branding in frame.'
+  use_animated_gif: true
+  gif_num_frames: 5
+  gif_frame_duration: 900
+  curated_library: []
+  aspect_ratio: '1:1'
+content_pillars:
+- name: M&A Insights
+  use_veo: true
+  target_client: 'Business owners, CEOs, and corporate decision-makers considering
+    strategic transactions, mergers, acquisitions, or capital raising.
+    '
+  angle: 'Share timely insights on cross-border M&A trends, deal structures between
+    Europe and China, and market dynamics that help executives make informed strategic decisions.
+    '
+  proof_points:
+  - Track record closing cross-border deals between Europe and China
+  - Deep expertise in regulatory navigation across EU and Chinese markets
+  - Boutique model — every senior partner is hands-on throughout the transaction
+  ctas:
+  - Schedule a confidential consultation
+  - Request a strategic briefing on current deal flow
+  hashtags:
+  - '#CrossBorderMA'
+  - '#DealMaking'
+  - '#CorporateGrowth'
+  use_news_search: true
+  image_prompt: 'Senior European M&A advisor and Chinese corporate executive shaking
+    hands across a polished conference table, signed term sheet visible between them.
+    Floor-to-ceiling window shows Frankfurt skyline at golden hour. Second advisor
+    taking notes in background. Photorealistic, warm cinematic light. No text, no logos.
+    '
+  video_prompt: 'Cinematic 16:9 cross-border M&A advisory session. A senior European
+    advisor walks a Chinese corporate executive through a deal structure projected on a
+    large boardroom screen — both leaning forward, pointing at acquisition diagrams.
+    Cut to close-up: hands annotating a term sheet on a glass conference table. Wide
+    shot reveals two additional advisors working at a side table, financial models open
+    on laptops. Purposeful, focused atmosphere. Warm professional lighting, documentary
+    grade. No drinks, no text visible.'
+
+- name: Industry Expertise
+  use_veo: false
+  target_client: 'Sector-specific businesses in industrial manufacturing, technology,
+    and clean energy seeking advisors with deep domain knowledge.
+    '
+  angle: >-
+    Demonstrate Seta Capital specialized expertise across industrial verticals:
+    EV, automation, precision manufacturing. Sharing concrete insights that resonate
+    with sector-specific M&A challenges.
+  proof_points:
+  - Operator-led approach — principals who have run industrial businesses, not just advised
+  - Sector expertise in EV supply chain, precision manufacturing, automation
+  - Network of strategic buyers and PE funds active in European-Chinese industrial deals
+  ctas:
+  - Discuss your sector-specific challenges
+  - Explore industrial M&A opportunities
+  hashtags:
+  - '#IndustrialMA'
+  - '#EVSupplyChain'
+  - '#OperatorLedAdvisory'
+  use_news_search: true
+  image_prompt: 'European quality engineer and Chinese operations director standing
+    together on a modern precision manufacturing floor, reviewing technical specifications
+    on a tablet. Automated robotic arms working in background, clean industrial lighting,
+    depth-of-field blur. Photorealistic, professional industrial photography. No text, no logos.
+    '
+
+- name: Thought Leadership
+  use_veo: true
+  target_client: 'Senior executives, PE fund partners, and family office principals
+    seeking forward-looking perspectives on cross-border investment and industrial transformation.
+    '
+  angle: 'Position Seta Capital as a thought leader on Europe-China industrial M&A —
+    forward-looking perspectives on regulatory shifts, sector convergence, and where
+    strategic value lies in 2025-2026.
+    '
+  proof_points:
+  - Regular analysis of EU-China investment flows and regulatory landscape
+  - Insight into family-owned business succession as M&A catalyst in Germany and Italy
+  - View on how Chinese industrial capital is repositioning into European strategic assets
+  ctas:
+  - Read our latest market perspectives
+  - Connect with our advisory team
+  hashtags:
+  - '#ThoughtLeadership'
+  - '#EuropeChinaInvestment'
+  - '#IndustrialTransformation'
+  use_news_search: true
+  image_prompt: 'Senior Chinese investor and European family business owner seated
+    across from each other at a wooden table in a sunlit Milan boardroom. Architectural
+    drawings and financial charts spread between them. Warm natural light, bookshelves
+    in background. Cinematic composition, photorealistic. No text, no logos.
+    '
+  video_prompt: 'Cinematic 16:9 timelapse of European industrial infrastructure —
+    steel bridges, precision factories, electric vehicle charging grids — transitioning
+    to Asian technology parks with solar panels and automated warehouses. Split-screen
+    effect blending both worlds. Slow cinematic pan, professional documentary colour grade,
+    evokes strategic convergence between two industrial powerhouses.'
+
+- name: Market Intelligence
+  use_veo: false
+  use_chart: true
+  use_news_search: false
+  target_client: >-
+    PE fund partners, CFOs, and corporate development teams tracking macro
+    conditions that affect cross-border deal valuations, financing costs,
+    and strategic timing between Europe and China.
+  angle: >-
+    Provide data-driven insight on the macro indicators that move Europe-China
+    M&A: EUR/CNY exchange rates, GDP growth differentials, and US rate dynamics
+    that affect deal financing and cross-border capital flows.
+  proof_points:
+  - EUR/CNY movement directly impacts acquisition prices for European buyers in China
+  - GDP growth divergence signals where strategic buyers are hunting for assets
+  - US 10Y yield shapes leveraged buyout financing costs across jurisdictions
+  ctas:
+  - Discuss how current macro conditions affect your deal timeline
+  - Request a strategic briefing on Europe-China capital flows
+  hashtags:
+  - '#MacroIntelligence'
+  - '#CrossBorderCapital'
+  - '#EURCNYWatch'
+  - '#DealTiming'
+  image_prompt: >-
+    Senior M&A analyst reviewing live Bloomberg terminal data in a dark premium
+    office. Multiple screens showing currency charts and yield curves. Warm lamp
+    light contrasting with blue screen glow. Cinematic depth of field.
+    Photorealistic, no text visible, no logos.

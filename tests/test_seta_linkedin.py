@@ -14,7 +14,7 @@ from test_common import (
     py_help_ok, py_compile_ok, bash_n_ok,
 )
 
-SETA_CAMPAIGN_YAML = SEO_ROOT / 'config' / 'seta_capital_linkedin.yaml'
+SETA_CAMPAIGN_YAML = Path(os.getenv('SETA_CAMPAIGN_CONFIG', str(PKG_DIR.parent / 'config' / 'seta_capital_linkedin.yaml')))
 
 def load_seta_campaign():
     with open(SETA_CAMPAIGN_YAML) as f:
