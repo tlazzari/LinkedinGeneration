@@ -255,4 +255,19 @@ class LinkedInPublisher:
         return response.json()
 
 
+    def delete_post(self, urn: str) -> int:
+        """Delete a published post by its share/ugcPost URN.
+
+        LinkedIn requires the URN percent-encoded in the path. Deletion is
+        permanent: the URN cannot be reused and any engagement is lost.
+        Returns the HTTP status (204 on success).
+        """
+        from urllib.parse import quote
+        url = f"{LINKEDIN_API_BASE}/ugcPosts/{quote(urn, safe='')}"
+        response = requests.delete(url, headers=self._headers(), timeout=30)
+        if response.status_code not in (200, 204):
+            response.raise_for_status()
+        return response.status_code
+
+
 __all__ = ["LinkedInPublisher", "LinkedInPublisherConfig"]
