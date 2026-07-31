@@ -34,6 +34,10 @@ class ImageProviderConfig:
     gif_num_frames: int = 6
     gif_frame_duration: int = 1000
     aspect_ratio: str | None = None
+    # Absolute path to a brand logo stamped onto each animated-GIF frame.
+    # None = no overlay. MUST be set per brand — a hardcoded default here is
+    # what put the TNT Motion logo on Seta Capital posts (May-Jul 2026).
+    logo_path: str | None = None
 
     @classmethod
     def from_mapping(cls, data: Dict[str, Any]) -> "ImageProviderConfig":
@@ -55,6 +59,7 @@ class ImageProviderConfig:
             gif_num_frames=int(data.get("gif_num_frames", 6)),
             gif_frame_duration=int(data.get("gif_frame_duration", 1000)),
             aspect_ratio=data.get("aspect_ratio"),
+            logo_path=data.get("logo_path"),
         )
 
 
@@ -585,7 +590,8 @@ def create_image_provider(config: ImageProviderConfig) -> ImageProvider:
         return AnimatedGIFProvider(
             base_provider=base_provider,
             num_frames=config.gif_num_frames,
-            frame_duration=config.gif_frame_duration
+            frame_duration=config.gif_frame_duration,
+            logo_path=config.logo_path,
         )
     
     return base_provider
@@ -726,7 +732,8 @@ class ReplicateVideoProvider:
 class AnimatedGIFProvider:
     """Generate animated GIFs from multiple AI-generated images."""
 
-    def __init__(self, base_provider, num_frames: int = 6, frame_duration: int = 1000):
+    def __init__(self, base_provider, num_frames: int = 6, frame_duration: int = 1000,
+                 logo_path: str | None = None):
         """
         Initialize with a base image provider.
 
@@ -734,10 +741,13 @@ class AnimatedGIFProvider:
             base_provider: The image provider to use for generating frames
             num_frames: Number of frames to generate (default: 6)
             frame_duration: Duration of each frame in milliseconds (default: 1000ms = 1s)
+            logo_path: Brand logo stamped on every frame. None = no overlay.
+                Never default this to a specific brand — see ImageProviderConfig.
         """
         self.base_provider = base_provider
         self.num_frames = num_frames
         self.frame_duration = frame_duration
+        self.logo_path = Path(logo_path) if logo_path else None
 
     def get_image(self, *, prompt: str, target_dir: Path, alt_text: str) -> Dict[str, Any]:
         """Generate an animated GIF by creating multiple image variations."""
@@ -783,10 +793,12 @@ class AnimatedGIFProvider:
                 frame_path = frame_result.path
                 frame_paths.append(frame_path)
 
-                # CRITICAL: TNT Motion logo overlay - DO NOT REMOVE unless expressly commanded
-                # This adds the TNT Motion logo to each GIF frame BEFORE loading into memory
-                logo_path = Path(__file__).parent.parent.parent / "assets" / "tnt_motion_logo.png"
-                if logo_path.exists():
+                # CRITICAL: brand logo overlay - DO NOT REMOVE unless expressly commanded
+                # Stamps the CALLING BRAND's logo on each frame before loading it into
+                # memory. self.logo_path is supplied by the brand's scheduler; it was
+                # hardcoded to TNT Motion until 2026-07-31, which branded Seta posts.
+                logo_path = self.logo_path
+                if logo_path and logo_path.exists():
                     add_logo_to_image(
                         frame_path,
                         logo_path,
@@ -802,7 +814,8 @@ class AnimatedGIFProvider:
                         img = img.convert('RGB')
                     frames.append(img.copy())
 
-                logger.info(f"  Frame {i+1} generated with logo: {frame_path}")
+                logger.info("  Frame %d generated (logo: %s): %s", i + 1,
+                            logo_path.name if logo_path else "none", frame_path)
 
             except Exception as exc:
                 logger.warning(f"Failed to generate frame {i+1}: {exc}")

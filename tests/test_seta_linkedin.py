@@ -273,4 +273,23 @@ if expiry_val:
     except ValueError:
         t.check(f'RULE: SETA_LINKEDIN_TOKEN_EXPIRY is a valid date (got: {expiry_val!r})', False)
 
+# === RULE: Seta posts must NEVER carry another brand's logo ===
+# 2026-05-12 -> 2026-07-23: AnimatedGIFProvider hardcoded assets/tnt_motion_logo.png
+# and stamped it on every frame regardless of brand, so 8 published Seta Capital
+# posts went out with the TNT Motion logo on them. The logo is now per-brand.
+prov_src = (PKG_DIR / 'social' / 'image_providers.py').read_text()
+seta_sched_src = (PKG_DIR / 'seta_post_scheduler.py').read_text()
+
+t.check('RULE: AnimatedGIFProvider takes a logo_path parameter',
+        'logo_path' in prov_src and 'self.logo_path' in prov_src)
+t.check('RULE: image_providers.py does NOT hardcode the TNT logo',
+        'tnt_motion_logo' not in prov_src)
+t.check('RULE: Seta scheduler passes its own logo_path (never TNT)',
+        'logo_path=' in seta_sched_src)
+t.check('RULE: Seta scheduler never references the TNT logo asset',
+        'tnt_motion_logo' not in seta_sched_src)
+t.check('RULE: Seta logo asset absent => Seta posts carry no logo',
+        (PROJECT_ROOT / 'assets' / 'seta_capital_logo.png').exists() is False
+        or 'SETA_LOGO_PATH' in seta_sched_src)
+
 sys.exit(t.summary())

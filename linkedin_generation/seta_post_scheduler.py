@@ -43,7 +43,11 @@ DEFAULT_STRATEGY_PATH = Path(os.path.expanduser("~/seta_strategy.txt"))
 STATE_FILENAME = "seta_campaign_state.json"
 ROTATION_STATE_FILENAME = "seta_scheduler_state.json"
 
-# Seta Capital logo for overlay
+# Seta Capital logo for overlay. This asset does not exist yet, so Seta posts
+# carry NO logo — which is correct. It must never fall back to another brand's
+# logo: until 2026-07-31 the GIF provider hardcoded the TNT Motion logo asset, so
+# every Seta animated-GIF post from 2026-05-12 to 2026-07-23 shipped with the
+# TNT Motion logo on it. Drop a seta_capital_logo.png into assets/ to enable.
 SETA_LOGO_PATH = PROJECT_ROOT / "assets" / "seta_capital_logo.png"
 
 
@@ -225,6 +229,7 @@ def generate_image_for_post(
             use_animated_gif=campaign.image_provider.use_animated_gif,
             gif_num_frames=campaign.image_provider.gif_num_frames,
             gif_frame_duration=campaign.image_provider.gif_frame_duration,
+            logo_path=str(SETA_LOGO_PATH) if SETA_LOGO_PATH.exists() else None,
         )
         provider = create_image_provider(provider_config)
 

@@ -129,4 +129,19 @@ if _reg_ok:
     except KeyError:
         t.check('get_brand raises on unknown brand', True)
 
+# === RULE: TNT keeps its logo, now passed explicitly per-brand ===
+# The GIF provider used to hardcode the TNT logo (which leaked onto Seta posts).
+# It is now a parameter — so TNT MUST supply it, or TNT silently loses branding.
+tnt_prov_src = (PKG_DIR / 'social' / 'image_providers.py').read_text()
+tnt_sched_src = (PKG_DIR / 'linkedin_post_scheduler.py').read_text()
+
+t.check('RULE: TNT logo asset exists',
+        (PROJECT_ROOT / 'assets' / 'tnt_motion_logo.png').exists())
+t.check('RULE: TNT scheduler defines TNT_LOGO_PATH',
+        'TNT_LOGO_PATH' in tnt_sched_src)
+t.check('RULE: TNT passes its logo into the image provider',
+        'logo_path=str(TNT_LOGO_PATH)' in tnt_sched_src)
+t.check('RULE: GIF provider honours a per-brand logo_path',
+        'self.logo_path' in tnt_prov_src)
+
 sys.exit(t.summary())

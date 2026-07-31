@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -47,6 +47,10 @@ import yaml
 import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# CRITICAL: TNT Motion logo overlay - DO NOT REMOVE unless expressly commanded
+# Passed explicitly into the image provider so the GIF wrapper stamps THIS
+# brand's logo (it used to hardcode TNT, which branded Seta Capital posts).
+TNT_LOGO_PATH = PROJECT_ROOT / "assets" / "tnt_motion_logo.png"
 DEFAULT_CAMPAIGN_CONFIG = PROJECT_ROOT / "config" / "linkedin_campaign.yaml"
 DEFAULT_STRATEGY_PATH = PROJECT_ROOT / "config" / "strategy.txt"
 
@@ -257,7 +261,9 @@ def maybe_run_biweekly_site_updates() -> None:
 
 def ensure_image_provider(config: CampaignConfig):
     try:
-        return create_image_provider(config.image_provider)
+        return create_image_provider(
+            replace(config.image_provider, logo_path=str(TNT_LOGO_PATH))
+        )
     except Exception as exc:
         logging.warning("Primary image provider failed: %s", exc)
         curated_entries = list(config.image_provider.curated_library)
