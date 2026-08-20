@@ -18,7 +18,7 @@ schedule:
     time: '15:00'
 image_provider:
   provider: google-imagen
-  model: imagen-4.0-generate-001
+  model: gemini-3.1-flash-image
   size: 1080x1080
   style_hint: 'Photorealistic corporate photography. Warm professional lighting.
     Specific business context — advisors, executives, deal-making scenes. No text,

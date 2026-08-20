@@ -246,7 +246,10 @@ class OpenRouterImageProvider:
 class GoogleImagenProvider:
     """Generate imagery or video via Google Imagen/Veo models."""
 
-    IMAGE_MODEL = "imagen-4.0-generate-001"
+    # Imagen was withdrawn from the v1beta predict endpoint — models/imagen-*
+    # returns 404 NOT_FOUND, and the only image models the key can reach are the
+    # gemini-*-image family, which answer on generateContent instead.
+    IMAGE_MODEL = "gemini-3.1-flash-image"
     VIDEO_MODEL = "veo-3.1-generate-preview"
     GOOGLE_VEO_ENDPOINT = (
         "https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-generate-preview:predictLongRunning"
@@ -313,44 +316,80 @@ class GoogleImagenProvider:
                     return bytes(maybe)
         raise RuntimeError(f"Google generative response missing {kind} bytes")
 
-    def get_image(self, *, prompt: str, target_dir: Path, alt_text: str | None = None) -> ImagePayload:
-        target_dir.mkdir(parents=True, exist_ok=True)
-        prompt_text = self._apply_style(prompt)
-
-        # Use aspect_ratio if specified, otherwise use size
-        generate_kwargs = {
-            "prompt": prompt_text,
-            "number_of_images": 1,
-        }
-        
+    def _image_via_predict(self, model: str, prompt_text: str) -> tuple[bytes, str]:
+        """Imagen-family models, which answer on the :predict endpoint."""
+        config: Dict[str, Any] = {"number_of_images": 1}
         if self.config.aspect_ratio:
-            generate_kwargs["aspect_ratio"] = self.config.aspect_ratio
-        else:
-            generate_kwargs["size"] = self.config.size
-        
+            config["aspect_ratio"] = self.config.aspect_ratio
         response = self._genai_client.models.generate_images(
-            model=self.IMAGE_MODEL,
-            prompt=prompt_text,
-            config={"number_of_images": 1}
+            model=model, prompt=prompt_text, config=config
         )
-
         images = getattr(response, "generated_images", None)
         if not images:
-            raise RuntimeError("Imagen response did not include images")
-
+            raise RuntimeError(f"{model} response did not include images")
         image_data = images[0]
-        # New API returns image with .image.image_bytes
         img_obj = getattr(image_data, "image", image_data)
         image_bytes = getattr(img_obj, "image_bytes", None)
         if not image_bytes:
             image_bytes = self._extract_binary(image_data, kind="image")
-        filename = f"imagen_{int(time.time() * 1000)}.png"
+        return bytes(image_bytes), "png"
+
+    def _image_via_generate_content(self, model: str, prompt_text: str) -> tuple[bytes, str]:
+        """gemini-*-image models, which return the image inline on generateContent."""
+        config = None
+        if self.config.aspect_ratio:
+            try:
+                from google.genai import types
+
+                config = types.GenerateContentConfig(
+                    image_config=types.ImageConfig(aspect_ratio=self.config.aspect_ratio)
+                )
+            except (ImportError, AttributeError, TypeError):
+                config = None       # older SDK — take the model's default framing
+        response = self._genai_client.models.generate_content(
+            model=model, contents=prompt_text, config=config
+        )
+        for candidate in getattr(response, "candidates", None) or []:
+            content = getattr(candidate, "content", None)
+            for part in getattr(content, "parts", None) or []:
+                inline = getattr(part, "inline_data", None)
+                data = getattr(inline, "data", None)
+                if data:
+                    mime = getattr(inline, "mime_type", "") or "image/png"
+                    return bytes(data), ("jpg" if "jpeg" in mime else "png")
+        raise RuntimeError(f"{model} returned no inline image data")
+
+    def get_image(self, *, prompt: str, target_dir: Path, alt_text: str | None = None) -> ImagePayload:
+        target_dir.mkdir(parents=True, exist_ok=True)
+        prompt_text = self._apply_style(prompt)
+
+        # The configured model is honoured — this used to read the class constant
+        # and silently ignore whatever the campaign YAML asked for.
+        model = (getattr(self.config, "model", None) or self.IMAGE_MODEL).strip()
+
+        if model.startswith("imagen"):
+            # Every models/imagen-*:predict call 404s on v1beta as of 2026-08-20,
+            # which is what killed the Seta post. Carry on with a current model
+            # rather than let a stale config take the run down with it.
+            try:
+                image_bytes, ext = self._image_via_predict(model, prompt_text)
+            except Exception as exc:                       # noqa: BLE001
+                logging.warning(
+                    "Image model %s unavailable (%s) — falling back to %s",
+                    model, exc, self.IMAGE_MODEL,
+                )
+                model = self.IMAGE_MODEL
+                image_bytes, ext = self._image_via_generate_content(model, prompt_text)
+        else:
+            image_bytes, ext = self._image_via_generate_content(model, prompt_text)
+
+        filename = f"img_{int(time.time() * 1000)}.{ext}"
         path = target_dir / filename
         path.write_bytes(image_bytes)
 
         return ImagePayload(
             prompt=prompt,
-            provider="imagen",
+            provider="google",
             path=path,
             alt_text=alt_text,
         )
@@ -756,6 +795,12 @@ class AnimatedGIFProvider:
         import time
 
         target_dir.mkdir(parents=True, exist_ok=True)
+        # Frames are assembly inputs, not output. Keeping them beside the GIF
+        # meant "is every recent image a GIF?" had to be answered by guessing
+        # from the filename prefix, which silently stopped working the moment
+        # the provider was renamed. A subdirectory states it instead.
+        frame_dir = target_dir / "frames"
+        frame_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"Generating animated GIF with {self.num_frames} frames")
 
@@ -785,7 +830,7 @@ class AnimatedGIFProvider:
                 # Generate frame using base provider
                 frame_result = self.base_provider.get_image(
                     prompt=frame_prompt,
-                    target_dir=target_dir,
+                    target_dir=frame_dir,
                     alt_text=f"{alt_text} - frame {i+1}"
                 )
 

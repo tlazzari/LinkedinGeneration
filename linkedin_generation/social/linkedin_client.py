@@ -40,6 +40,13 @@ class LinkedInPublisher:
         image_path: Path,
     ) -> Dict[str, Any]:
         """Publish an image post and return LinkedIn response metadata."""
+        # Checked before registering an upload slot with LinkedIn: a None here
+        # used to reach image_path.read_bytes() and surface as an AttributeError
+        # halfway through publishing, having already burned the registration.
+        if image_path is None or not Path(image_path).exists():
+            raise ValueError(
+                f"publish_post requires an existing image file, got {image_path!r}"
+            )
         asset_info = self._register_image_upload()
         upload_url = asset_info["uploadUrl"]
         asset = asset_info["asset"]

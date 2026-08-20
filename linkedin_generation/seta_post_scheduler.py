@@ -223,7 +223,7 @@ def generate_image_for_post(
     try:
         provider_config = ImageProviderConfig(
             provider="google",
-            model=campaign.image_provider.model or "imagen-4.0-generate-001",
+            model=campaign.image_provider.model or GoogleImagenProvider.IMAGE_MODEL,
             size=campaign.image_provider.size or "1024x1024",
             style_hint=campaign.image_provider.style_hint,
             use_animated_gif=campaign.image_provider.use_animated_gif,
@@ -462,6 +462,17 @@ def run_single_generation(
                 fallback_dir=images_dir,
                 timestamp=scheduled_for,
             )
+            if local_image_path is None:
+                # Seta never publishes without media, so a failed image means no
+                # post — but it must end the run cleanly. On 2026-08-20 this fell
+                # through to publish_post() and died on None.read_bytes(), which
+                # turned a missing image into a stack trace and a silent no-post.
+                logging.error(
+                    "No image produced for pillar '%s' — skipping today's post "
+                    "rather than publishing without media",
+                    pillar.name,
+                )
+                return None
             publish_result = publisher.publish_post(
                 text=post.as_text,
                 headline=post.headline,
