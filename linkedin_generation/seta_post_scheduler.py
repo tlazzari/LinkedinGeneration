@@ -659,6 +659,16 @@ def _run_holiday_post(
             fallback_dir=images_dir,
             timestamp=scheduled_for,
         )
+        if local_image_path is None:
+            # Same rule as the daily path (guarded 2026-08-20): Seta never publishes
+            # without media, so a failed image means no post — and it must end the run
+            # cleanly rather than raising out of publish_post().
+            logging.error(
+                "No image produced for holiday '%s' — skipping the post rather than "
+                "publishing without media",
+                holiday.name,
+            )
+            return
         publish_result = publisher.publish_post(
             text=post.as_text,
             headline=post.headline,

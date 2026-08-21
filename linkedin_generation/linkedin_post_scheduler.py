@@ -502,7 +502,18 @@ def daily_runner(
         extra_metadata["holiday_start_date"] = decision.holiday.start_date.isoformat()
         extra_metadata["holiday_end_date"] = decision.holiday.end_date.isoformat()
 
-    if publisher:
+    if publisher and local_image_path is None:
+        # Image generation returns None on failure. Publishing without media is not
+        # an option, and letting the None reach publish_post() only trades the old
+        # AttributeError for a ValueError — either way the run dies mid-flight and
+        # the post is silently lost (Seta, 2026-08-20). Skip the publish; the
+        # artefacts below are still saved so the generated copy is not thrown away.
+        logging.error(
+            "No image produced for pillar '%s' — skipping today's LinkedIn post "
+            "rather than publishing without media",
+            pillar.name,
+        )
+    elif publisher:
         publish_result = publisher.publish_post(
             text=post.as_text,
             headline=post.headline,

@@ -5,7 +5,7 @@ IMPORTANT: Several tests here are RULE ENFORCERS, not just code checks. They pre
 accidental removal of the Veo video generator, generic image prompts, and missing
 video_prompt fields. Do not remove or weaken them without a deliberate decision.
 """
-import os, sys
+import os, re, sys
 import yaml
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -196,6 +196,38 @@ t.check('RULE: Veo fallback uses Imagen instead of skipping post',
         'falling back to Imagen' in sched_src and 'generate_image_for_post' in sched_src)
 t.check('RULE: non-Veo pillars still generate animated GIF image',
         '# Non-Veo pillar' in sched_src or 'Industry Expertise' in sched_src or 'generate_image_for_post' in sched_src)
+
+
+# === RULE: a failed image must SKIP the post, never crash the run ===
+# 2026-08-20: Google withdrew imagen-4.0 from the v1beta predict endpoint, image
+# generation returned None, and the None travelled all the way into publish_post()
+# -> image_path.read_bytes() -> AttributeError. The Seta post did not just lose its
+# picture, it died with a stack trace and was silently never published. Every
+# publish_post() call site must therefore be preceded by a None check (or sit inside
+# a try/except), so any future image failure -- 429 quota, 503, network -- skips.
+def _publish_sites_are_guarded(src: str):
+    """Return (total_call_sites, unguarded_line_numbers)."""
+    lines = src.splitlines()
+    total, unguarded = 0, []
+    for i, ln in enumerate(lines):
+        if 'publisher.publish_post(' not in ln:
+            continue
+        total += 1
+        window = '\n'.join(lines[max(0, i - 15):i])
+        if ('local_image_path is None' in window
+                or re.search(r'^\s*try:\s*$', window, re.M)):
+            continue
+        unguarded.append(i + 1)
+    return total, unguarded
+
+for _name, _src in (('seta_post_scheduler.py', sched_src),
+                    ('linkedin_post_scheduler.py',
+                     (PKG_DIR / 'linkedin_post_scheduler.py').read_text())):
+    _total, _bad = _publish_sites_are_guarded(_src)
+    t.check('RULE: %s has publish_post call sites to check' % _name, _total > 0)
+    t.check('RULE: every publish_post in %s guards a None image (skip, not crash)' % _name,
+            not _bad,
+            'unguarded call sites at line(s): %s' % _bad if _bad else '')
 
 
 # === RULE: Market Intelligence pillar exists and is correctly configured ===
