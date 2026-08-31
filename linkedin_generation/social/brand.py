@@ -11,7 +11,10 @@ To add a new brand later:
      _build_prompt() with the brand's voice and enrichment).
   2. Add a `Brand(...)` entry to `BRANDS` below (or call `register_brand()`
      at runtime) with the brand's env keys, config paths and capability set.
-  3. Add its campaign + holiday YAML under config/ and a cron entry.
+  3. Give it a `BrandVoice` (post_quality.py): the company name as written in
+     posts, that brand's own tired vocabulary, and whether a direct sales CTA is
+     wanted. Everything else the quality gate enforces is company-agnostic.
+  4. Add its campaign + holiday YAML under config/ and a cron entry.
 No changes to the shared modules are needed.
 
 Capability flags describe which enrichment a brand's pipeline uses, so a future
@@ -25,6 +28,7 @@ from dataclasses import dataclass
 from typing import Dict, FrozenSet, Type
 
 from .base_content import BaseContentGenerator
+from .post_quality import SETA_VOICE, TNT_VOICE, BrandVoice
 from .content_generation import LinkedInPostGenerator
 from .seta_content_generation import SetaLinkedInPostGenerator
 
@@ -57,6 +61,9 @@ class Brand:
     # which enrichment this brand's pipeline uses
     capabilities: FrozenSet[str]
 
+    # editorial rules the quality gate enforces for this brand
+    voice: BrandVoice
+
     def has(self, capability: str) -> bool:
         return capability in self.capabilities
 
@@ -80,6 +87,7 @@ BRANDS: Dict[str, Brand] = {
         owner_env="LINKEDIN_OWNER_URN",
         token_env="LINKEDIN_ACCESS_TOKEN",
         capabilities=frozenset({"logo_overlay", "biweekly_site_update", "animated_gif", "holiday"}),
+        voice=TNT_VOICE,
     ),
     "seta": Brand(
         key="seta",
@@ -102,6 +110,7 @@ BRANDS: Dict[str, Brand] = {
         owner_env="SETA_LINKEDIN_OWNER_URN",
         token_env="SETA_LINKEDIN_ACCESS_TOKEN",
         capabilities=frozenset({"news", "charts", "video", "holiday"}),
+        voice=SETA_VOICE,
     ),
 }
 

@@ -443,7 +443,7 @@ t.check('RULE: sourcing check is skipped when no sources are supplied',
 
 _gen_src2 = (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
 t.check('RULE: generator passes fetched sources into the gate',
-        'post_issues(payload, SETA_VOICE, sources=sources)' in _gen_src2)
+        'post_issues(payload, SETA_VOICE, sources=sources' in _gen_src2)
 t.check('RULE: sources include chart data, news context and proof points',
         'chart_data, news_context' in _gen_src2 and 'pillar.proof_points' in _gen_src2)
 t.check('RULE: prompt forbids inventing statistics',
@@ -494,5 +494,73 @@ t.check('RULE: TNT may name itself in the body, Seta may not',
         and any('closing paragraph only' in i for i in post_issues(
             {'headline': 'A Claim', 'body': 'Seta Capital sees a shift.\n\nTwo.',
              'cta': 'What do you see?'}, SETA_VOICE)))
+
+# === RULE: posts must be concrete, and holidays play by different rules ===
+# Measured across Seta's 32-post archive: every single post used more than 3
+# filler terms per 100 words (median 5.40, max 8.33), "strategic" alone
+# averaging 3.19 uses per post. Abstraction is what made them interchangeable.
+from linkedin_generation.social.post_quality import (   # noqa: E402
+    FILLER_TERMS, filler_density, filler_hits,
+)
+from linkedin_generation.social.brand import get_brand   # noqa: E402
+
+_waffle = {'headline': 'A Claim About German Assets',
+           'body': ('The strategic landscape is complex and evolving.\n\n'
+                    'Robust dynamic leverage underscores nuanced intricate value.'),
+           'cta': 'Seta Capital sees a shift. What do you see?'}
+t.check('RULE: consultant filler is measured, not guessed',
+        filler_density('strategic complex dynamic landscape') == 100.0)
+t.check('RULE: an abstract post is rejected',
+        any('filler' in i for i in post_issues(_waffle, SETA_VOICE)),
+        str(post_issues(_waffle, SETA_VOICE)))
+t.check('RULE: the rejection names the worst offenders',
+        any("'strategic'" in i or "'complex'" in i
+            for i in post_issues(_waffle, SETA_VOICE) if 'filler' in i))
+t.check('RULE: a concrete post passes',
+        not any('filler' in i for i in post_issues(
+            {'headline': 'Mittelstand Succession Is Repricing German Machine Tools',
+             'body': ('Three Baden-Wurttemberg toolmakers changed hands this quarter.\n\n'
+                      'Each sold a minority stake to a Chinese buyer.'),
+             'cta': 'Seta Capital reads it as succession, not appetite. What do you see?'},
+            SETA_VOICE)))
+
+_holiday = {'headline': 'Happy Mid-Autumn Festival',
+            'body': 'Wishing you a restful break.\n\nSee you after.',
+            'cta': 'Enjoy the festival.'}
+t.check('RULE: holiday posts need no discussion question',
+        post_issues(_holiday, SETA_VOICE, post_type='holiday') == [],
+        str(post_issues(_holiday, SETA_VOICE, post_type='holiday')))
+t.check('RULE: the same post as analysis still needs one',
+        any('question' in i for i in post_issues(_holiday, SETA_VOICE, post_type='market')))
+t.check('RULE: holiday posts are exempt from the cliche list',
+        post_issues({'headline': 'Happy Holidays From A Cross-Border Team',
+                     'body': 'One.\n\nTwo.', 'cta': 'Enjoy.'},
+                    SETA_VOICE, post_type='holiday') == [])
+
+# --- productisation: one registry entry per company ---
+t.check('RULE: each brand carries its voice in the registry',
+        get_brand('seta').voice is SETA_VOICE and get_brand('tnt').voice is TNT_VOICE)
+t.check('RULE: adding a company needs only a Brand entry',
+        'BrandVoice' in (PKG_DIR / 'social' / 'brand.py').read_text()
+        and 'Give it a `BrandVoice`' in (PKG_DIR / 'social' / 'brand.py').read_text())
+import inspect  # noqa: E402
+from linkedin_generation.social import post_quality as _pq   # noqa: E402
+_generic = ''.join(inspect.getsource(f) for f in
+                   (_pq.post_issues, _pq.apply_fixes, _pq.filler_density,
+                    _pq.promotional_hits, _pq.unsupported_statistics))
+t.check('RULE: the gate logic names no company (only the voices do)',
+        'Seta' not in _generic and 'TNT' not in _generic, _generic[:120])
+for _b in ('seta', 'tnt'):
+    _v = get_brand(_b).voice
+    t.check(f'RULE: {_b} voice is complete',
+            bool(_v.name) and len(_v.overused_headline_terms) >= 3
+            and _v.max_filler_per_100_words > 0)
+
+t.check('RULE: both prompts demand concrete writing',
+        'WRITE CONCRETELY' in (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
+        and 'WRITE CONCRETELY' in (PKG_DIR / 'social' / 'content_generation.py').read_text())
+t.check('RULE: post_type reaches the gate so holidays are exempt in production',
+        'post_type=post_type' in (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
+        and 'post_type=post_type' in (PKG_DIR / 'social' / 'content_generation.py').read_text())
 
 sys.exit(t.summary())

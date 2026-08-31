@@ -52,6 +52,20 @@ PROMOTIONAL_PATTERNS = [
     r"\brequest a (?:strategic )?briefing\b",
 ]
 
+# Consultant filler. Measured across Seta's 32-post archive: EVERY post exceeded
+# 3 of these per 100 words (median 5.40, max 8.33), with "strategic" alone
+# averaging 3.19 uses per post. Abstraction is what makes the posts
+# interchangeable, and interchangeable posts are what the feed ignores.
+FILLER_TERMS = [
+    "strategic", "complex", "dynamic", "landscape", "significant", "evolving",
+    "robust", "unlock", "leverage", "intricate", "nuanced", "underscore",
+    "crucial", "synerg", "optimis", "optimiz", "unparalleled", "meticulous",
+    "cutting-edge", "seamless", "holistic", "paramount", "pivotal",
+    "comprehensive", "sophisticated", "transformational", "value-add",
+    "game-changer", "fast-paced", "discerning", "vibrant", "profound",
+]
+
+
 @dataclass(frozen=True)
 class BrandVoice:
     """What the gate needs to know about one brand's copy."""
@@ -69,6 +83,9 @@ class BrandVoice:
     # Both brands publish into a feed that amplifies conversation: 0 comments
     # across TNT's 107 posts and 1 across Seta's 67 (measured 2026-08-31).
     require_closing_question: bool = True
+    # Filler terms per 100 words. 2.5 is roughly half the archive median, so it
+    # forces concrete nouns without being unreachable in one retry.
+    max_filler_per_100_words: float = 2.5
 
 
 # Worn-out headline vocabulary, measured over each brand's own archive.
@@ -134,6 +151,20 @@ MAX_BODY_WORDS_PER_PARAGRAPH = 60
 _SENTENCE_SPLIT = re.compile(r"(?<![A-Z])(?<=[.!?])\s+(?=[A-Z])")
 
 
+def filler_hits(text: str) -> Dict[str, int]:
+    """Consultant filler present in text, term -> count."""
+    low = text.lower()
+    return {term: low.count(term) for term in FILLER_TERMS if low.count(term)}
+
+
+def filler_density(text: str) -> float:
+    """Filler terms per 100 words."""
+    words = len(text.split())
+    if not words:
+        return 0.0
+    return sum(filler_hits(text).values()) / words * 100
+
+
 def promotional_hits(text: str) -> List[str]:
     """Promotional phrases present in text, as the matched substrings."""
     hits: List[str] = []
@@ -189,13 +220,19 @@ def post_issues(
     payload: Dict[str, object],
     voice: BrandVoice,
     sources: Optional[str] = None,
+    post_type: str = "",
 ) -> List[str]:
     """Every reason this post is not repost-worthy. Empty list == publishable.
 
     `sources` is the data actually fetched for this post (chart figures, news
     context, curated proof points). Pass it to check that every statistic the
     post asserts traces back to real data; omit it to skip that check.
+
+    `post_type` lets holiday greetings off the rules written for analysis posts:
+    a Ferragosto message does not need a discussion question and is allowed to
+    say "festive" without being accused of house cliches.
     """
+    is_holiday = post_type == "holiday"
     issues: List[str] = []
     headline = str(payload.get("headline", "") or "")
     body = str(payload.get("body", "") or "")
@@ -216,12 +253,26 @@ def post_issues(
     ):
         issues.append(f"{voice.name} appears in the headline or body - closing paragraph only")
 
-    if voice.require_closing_question and "?" not in cta:
+    if voice.require_closing_question and not is_holiday and "?" not in cta:
         issues.append("closing paragraph asks no question - end on a genuine open question")
 
-    for term in voice.overused_headline_terms:
+    for term in (() if is_holiday else voice.overused_headline_terms):
         if term in headline.lower():
             issues.append(f"headline reuses the house cliche '{term}'")
+
+    if not is_holiday:
+        density = filler_density(f"{headline} {body} {cta}")
+        if density > voice.max_filler_per_100_words:
+            worst = sorted(
+                filler_hits(f"{headline} {body} {cta}").items(),
+                key=lambda kv: -kv[1],
+            )[:4]
+            issues.append(
+                f"too much abstract filler ({density:.1f} per 100 words, limit "
+                f"{voice.max_filler_per_100_words}) — replace "
+                + ", ".join(f"'{term}' x{count}" for term, count in worst)
+                + " with concrete nouns, names and specifics"
+            )
 
     paragraphs = [p for p in body.split("\n\n") if p.strip()]
     if len(paragraphs) < 2:
@@ -291,6 +342,9 @@ def apply_fixes(payload: Dict[str, object], voice: BrandVoice) -> Dict[str, obje
 
 __all__ = [
     "BrandVoice",
+    "FILLER_TERMS",
+    "filler_density",
+    "filler_hits",
     "SETA_VOICE",
     "TNT_VOICE",
     "VOICES",

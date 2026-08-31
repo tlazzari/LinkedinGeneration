@@ -55,7 +55,7 @@ class LinkedInPostGenerator(BaseContentGenerator):
         # Same gate as Seta, with TNT's own policy: its direct CTA is wanted, so
         # only the conversation, formatting, vocabulary and sourcing rules bite.
         sources = "\n".join(pillar.proof_points or [])
-        issues = post_issues(payload, TNT_VOICE, sources=sources)
+        issues = post_issues(payload, TNT_VOICE, sources=sources, post_type=post_type)
         if issues:
             logger.warning(
                 "TNT post failed the quality gate (%s) - regenerating once",
@@ -73,11 +73,11 @@ class LinkedInPostGenerator(BaseContentGenerator):
                 max_tokens=650,
             )
             retry_payload = self._parse_response(retry_raw)
-            if len(post_issues(retry_payload, TNT_VOICE, sources=sources)) < len(issues):
+            if len(post_issues(retry_payload, TNT_VOICE, sources=sources, post_type=post_type)) < len(issues):
                 payload = retry_payload
 
         payload = apply_fixes(payload, TNT_VOICE)
-        remaining = post_issues(payload, TNT_VOICE, sources=sources)
+        remaining = post_issues(payload, TNT_VOICE, sources=sources, post_type=post_type)
         if remaining:
             logger.warning(
                 "TNT post published with unresolved quality issues: %s",
@@ -266,6 +266,7 @@ class LinkedInPostGenerator(BaseContentGenerator):
             "Constraints:\n"
             "- Keep total post length strictly under 150 words across headline + body + CTA combined. Be punchy and concise — LinkedIn readers scroll fast.\n"
             "- Open with an attention-grabbing hook line (uppercase allowed).\n"
+            "- WRITE CONCRETELY. Banned as padding: strategic, complex, dynamic, landscape, evolving, robust, leverage, nuanced, intricate, crucial, comprehensive, seamless, cutting-edge, unparalleled, paramount, holistic, value-add. Across this page's archive every post averaged 5 such words per 100 - which is why they all read the same. Name the country, the sector, the component, the situation. A sentence that would still be true for a different company in a different industry is padding: cut it.\n"
             "- Use European spelling (eg, optimise, organisation).\n"
             "- Mention TNT Motion explicitly once.\n"
             "- Reference the relevant industries or scenarios the pillar covers.\n"

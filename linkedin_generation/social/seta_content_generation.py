@@ -73,7 +73,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
 
         # A prompt is a request, not a guarantee: check what came back and give
         # the model one corrective pass before falling back to mechanical fixes.
-        issues = post_issues(payload, SETA_VOICE, sources=sources)
+        issues = post_issues(payload, SETA_VOICE, sources=sources, post_type=post_type)
         if issues:
             logger.warning(
                 "Seta post failed the quality gate (%s) - regenerating once",
@@ -95,11 +95,11 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             retry_payload = self._strip_urls(
                 self._parse_response(retry_raw), news_articles, post_type
             )
-            if len(post_issues(retry_payload, SETA_VOICE, sources=sources)) < len(issues):
+            if len(post_issues(retry_payload, SETA_VOICE, sources=sources, post_type=post_type)) < len(issues):
                 payload = retry_payload
 
         payload = apply_fixes(payload, SETA_VOICE)
-        remaining = post_issues(payload, SETA_VOICE, sources=sources)
+        remaining = post_issues(payload, SETA_VOICE, sources=sources, post_type=post_type)
         if remaining:
             logger.warning(
                 "Seta post published with unresolved quality issues: %s",
@@ -325,6 +325,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             "or 'analysts estimate' — the pipeline fetches only ECB FX rates, FRED yields, "
             "World Bank GDP and the news headlines given. If you have no figure for a point, "
             "make it qualitatively; readers here are M&A professionals who will check.\n"
+            "- WRITE CONCRETELY. Banned as padding: strategic, complex, dynamic, landscape, evolving, robust, leverage, nuanced, intricate, crucial, comprehensive, seamless, cutting-edge, unparalleled, paramount, holistic, value-add. Across this page's archive every post averaged 5 such words per 100 - which is why they all read the same. Name the country, the sector, the component, the situation. A sentence that would still be true for a different company in a different industry is padding: cut it.\n"
             "- NEVER include political commentary or negative remarks about any country.\n"
             "- Finish with 3-5 hashtags from this pool: "
             f"{hashtag_pool}.\n"
