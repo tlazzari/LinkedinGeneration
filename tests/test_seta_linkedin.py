@@ -324,4 +324,24 @@ t.check('RULE: Seta logo asset absent => Seta posts carry no logo',
         (PROJECT_ROOT / 'assets' / 'seta_capital_logo.png').exists() is False
         or 'SETA_LOGO_PATH' in seta_sched_src)
 
+# === RULE: follower analytics must survive LinkedIn's Rest.li quirks ===
+# Three separate 400/403s were hit building this: requests percent-encodes the
+# timeIntervals parens (400), networkSizes is v2-only with edgeType
+# CompanyFollowedByMember (400), and a token without rw_organization_admin is
+# refused (403) — the last must surface as an actionable error, not a traceback.
+analytics_src = (PKG_DIR / 'social' / 'follower_analytics.py').read_text()
+
+t.check('follower_analytics.py compiles', py_compile_ok('social/follower_analytics.py'))
+t.check('RULE: timeIntervals is passed as raw_query, never through requests params',
+        'raw_query=f"timeIntervals=' in analytics_src)
+t.check('RULE: networkSizes uses the v2 base and CompanyFollowedByMember edgeType',
+        'V2_BASE' in analytics_src and 'CompanyFollowedByMember' in analytics_src)
+t.check('RULE: v2 calls omit the LinkedIn-Version header',
+        'versioned=False' in analytics_src)
+t.check('RULE: 403 raises MissingAnalyticsScope naming rw_organization_admin',
+        'class MissingAnalyticsScope' in analytics_src
+        and 'rw_organization_admin' in analytics_src)
+t.check('follower_report.py compiles',
+        py_compile_ok('scripts/follower_report.py'))
+
 sys.exit(t.summary())
