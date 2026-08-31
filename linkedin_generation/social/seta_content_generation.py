@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 from .campaign_config import CampaignConfig, PostPillar
 from .news_search import NewsArticle, search_news_for_pillar, build_news_context
 from .base_content import GeneratedPost, BaseContentGenerator
+from .seta_post_quality import apply_fixes, post_issues
 
 if TYPE_CHECKING:
     from linkedin_generation.holiday.calendars import HolidayEvent
@@ -60,17 +61,42 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             temperature=0.8,
             max_tokens=800,
         )
-        payload = self._parse_response(raw)
+        payload = self._strip_urls(self._parse_response(raw), news_articles, post_type)
 
-        # Strip hallucinated URLs when no real news sources were provided
-        if not news_articles and post_type != "holiday":
-            import re
-            url_pattern = re.compile(r'\[?(https?://[^\s\]\)]+)\]?(?:\([^\)]+\))?')
-            for field in ("body", "headline", "cta"):
-                if field in payload and isinstance(payload[field], str):
-                    cleaned = url_pattern.sub('', payload[field])
-                    cleaned = re.sub(r'\s{2,}', ' ', cleaned).strip()
-                    payload[field] = cleaned
+        # A prompt is a request, not a guarantee: check what came back and give
+        # the model one corrective pass before falling back to mechanical fixes.
+        issues = post_issues(payload)
+        if issues:
+            logger.warning(
+                "Seta post failed the quality gate (%s) - regenerating once",
+                "; ".join(issues),
+            )
+            retry_raw = self.llm_client.complete(
+                self._build_prompt(
+                    pillar=pillar,
+                    post_type=post_type,
+                    image_mode=image_mode,
+                    holiday=holiday,
+                    news_context=news_context,
+                    chart_data=chart_data,
+                    quality_feedback=issues,
+                ),
+                temperature=0.8,
+                max_tokens=800,
+            )
+            retry_payload = self._strip_urls(
+                self._parse_response(retry_raw), news_articles, post_type
+            )
+            if len(post_issues(retry_payload)) < len(issues):
+                payload = retry_payload
+
+        payload = apply_fixes(payload)
+        remaining = post_issues(payload)
+        if remaining:
+            logger.warning(
+                "Seta post published with unresolved quality issues: %s",
+                "; ".join(remaining),
+            )
         hashtags = payload.get("hashtags") or []
         if isinstance(hashtags, str):
             hashtags = [tag.strip() for tag in hashtags.split() if tag.strip()]
@@ -116,6 +142,22 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             news_articles=news_articles,
         )
 
+    @staticmethod
+    def _strip_urls(
+        payload: Dict[str, Any], news_articles: List[NewsArticle], post_type: str
+    ) -> Dict[str, Any]:
+        """Remove hallucinated URLs when no real news sources were provided."""
+        if news_articles or post_type == "holiday":
+            return payload
+        import re
+
+        url_pattern = re.compile(r'\[?(https?://[^\s\]\)]+)\]?(?:\([^\)]+\))?')
+        for name in ("body", "headline", "cta"):
+            if name in payload and isinstance(payload[name], str):
+                cleaned = url_pattern.sub('', payload[name])
+                payload[name] = re.sub(r'\s{2,}', ' ', cleaned).strip()
+        return payload
+
     def _build_prompt(
         self,
         *,
@@ -125,6 +167,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         holiday: "HolidayEvent" | None = None,
         news_context: str = "",
         chart_data: str = "",
+            quality_feedback: Optional[List[str]] = None,
     ) -> str:
         proof_points = "\n".join(f"- {item}" for item in pillar.proof_points) or "- Strategic M&A advisory\n- Cross-border expertise"
         ctas = ", ".join(pillar.ctas or ["Connect with our advisory team", "Request a strategic briefing"])
@@ -247,19 +290,40 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             "- The post has TWO parts: (1) the BODY and (2) a single final paragraph in the 'cta' field.\n"
             "- BODY = authoritative, expert analysis in a thought-leadership voice. It must NOT mention "
             "Seta Capital, 'our firm', 'we', or any first-person brand reference. Pure insight only.\n"
-            "- cta = EXACTLY ONE short paragraph (2-3 sentences) — the ONLY place Seta Capital is named. "
-            "It ties the insight to Seta Capital's Europe-China M&A advisory and invites engagement.\n"
+            "- BODY FORMATTING: 3-4 SHORT paragraphs separated by a blank line, each at most 3 sentences "
+            "and under 60 words. Never one long block - LinkedIn hides everything after the first two "
+            "lines behind 'see more', so the opening sentence must stand alone as a hook.\n"
+            "- cta = EXACTLY ONE short paragraph that ENDS WITH A GENUINE OPEN QUESTION to the reader - "
+            "a real question a practitioner would want to answer from experience, specific to this post's "
+            "subject. Never a rhetorical or yes/no question, and never the same question twice.\n"
             "Constraints:\n"
+            "- This post must be worth resharing from a personal profile. It is an insight, NOT an "
+            "advertisement. Write nothing a reader could call promotional.\n"
+            "- FORBIDDEN anywhere in the post: 'specializes in', 'connect with us', 'contact us', "
+            "'reach out', 'get in touch', 'our firm', 'our team', 'our expertise', 'we advise', "
+            "'we help', 'trusted partner', 'discuss your strategic objectives', 'explore opportunities', "
+            "'request a briefing'. Do not sell, do not offer services, do not invite enquiries.\n"
+            "- Seta Capital may be named AT MOST ONCE, in the cta paragraph only, as a plain "
+            "attribution of viewpoint - never as a pitch, and never in headline or body.\n"
             "- Keep total length 150-250 words across headline + body + cta.\n"
             "- Open with an attention-grabbing hook that feels timely and relevant.\n"
             "- Use professional, analytical language appropriate for C-suite readers.\n"
-            "- Seta Capital must appear ONLY in the cta paragraph, nowhere in headline or body.\n"
+            "- HEADLINE: do NOT use the worn-out house vocabulary - avoid 'cross-border', 'navigating', "
+            "'unlocking', 'precision', 'reshaping' and 'strategic value'. Lead with the specific claim, "
+            "number or tension of THIS post so it does not read like every previous one.\n"
             "- NEVER include political commentary or negative remarks about any country.\n"
             "- Finish with 3-5 hashtags from this pool: "
             f"{hashtag_pool}.\n"
             f"{image_requirements}\n"
             "- Provide alt_text suitable for LinkedIn accessibility, 15-25 words.\n"
-            "Return JSON only, no extra text."
+            + (
+                "\nYour previous attempt was REJECTED for these reasons - fix every one:\n"
+                + "\n".join(f"- {issue}" for issue in quality_feedback)
+                + "\n"
+                if quality_feedback
+                else ""
+            )
+            + "Return JSON only, no extra text."
         )
 
 

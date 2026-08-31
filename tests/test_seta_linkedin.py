@@ -344,4 +344,73 @@ t.check('RULE: 403 raises MissingAnalyticsScope naming rw_organization_admin',
 t.check('follower_report.py compiles',
         py_compile_ok('scripts/follower_report.py'))
 
+# === RULE: posts must be repost-worthy, not advertisements ===
+# Measured 2026-08-31 over 67 posts (Dec 2025 - Aug 2026): 1 comment, 0 reposts,
+# median reach 227/post in March collapsing to 70 by August. Every post closed
+# on "Connect with us to discuss your strategic objectives" - nothing to reply
+# to - and 61 of 67 headlines contained "cross-border". The gate below is
+# enforced in code because a prompt alone cannot guarantee any of it.
+sys.path.insert(0, str(PROJECT_ROOT))
+from linkedin_generation.social.seta_post_quality import (   # noqa: E402
+    apply_fixes, post_issues, promotional_hits, reflow_paragraphs,
+)
+
+t.check('seta_post_quality.py compiles', py_compile_ok('social/seta_post_quality.py'))
+
+_old_style = {
+    'headline': 'Precision in Cross-Border M&A: Navigating Complexity',
+    'body': ('The EUR/CNY rate moved to 7.8422, a 2.06% appreciation. This raises the '
+             'effective acquisition cost for European buyers. The U.S. 10-Year yield is '
+             'now 4.49%, up from 4.05%. Financing costs are rising for leveraged buyouts. '
+             'GDP differentials still drive where capital is deployed.'),
+    'cta': ('Seta Capital specializes in advising C-suite leaders on transactions between '
+            'Europe and China. Connect with us to discuss your strategic objectives.'),
+}
+_issues = post_issues(_old_style)
+t.check('RULE: gate rejects the old promotional closing',
+        any('promotional' in i for i in _issues), str(_issues))
+t.check('RULE: gate rejects a closing with no question',
+        any('no question' in i for i in _issues), str(_issues))
+t.check('RULE: gate rejects house-cliche headlines',
+        any('cliche' in i for i in _issues), str(_issues))
+t.check('RULE: gate rejects a wall-of-text body',
+        any('single block' in i for i in _issues), str(_issues))
+
+_fixed = apply_fixes(_old_style)
+t.check('RULE: deterministic fix removes every promotional sentence',
+        promotional_hits(_fixed['body'] + ' ' + _fixed['cta']) == [],
+        repr(_fixed['cta']))
+t.check('RULE: deterministic fix breaks the body into paragraphs',
+        len([x for x in _fixed['body'].split('\n\n') if x.strip()]) >= 2)
+
+_good = {
+    'headline': 'Mittelstand Succession Is Repricing German Industrial Assets',
+    'body': ('The EUR/CNY rate moved to 7.8422 this quarter.\n\n'
+             'That shifts the arithmetic for European buyers.\n\n'
+             'Minority stakes are absorbing the difference.'),
+    'cta': ('Seta Capital reads this as a structural shift rather than a cycle. '
+            'What are you seeing on valuations in your own pipeline?'),
+}
+t.check('RULE: a clean insight-led post passes the gate',
+        post_issues(_good) == [], str(post_issues(_good)))
+
+# decimals and initialisms must not be mistaken for sentence ends
+t.check('RULE: paragraph reflow does not split decimals or initialisms',
+        '7.8422' in reflow_paragraphs('Rates hit 7.8422 today. The U.S. Fed held. Buyers paused.')
+        and 'U.S. Fed held' in reflow_paragraphs('Rates hit 7.8422 today. The U.S. Fed held. Buyers paused.'))
+
+_gen_src = (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
+t.check('RULE: generator runs the quality gate before publishing',
+        'post_issues(payload)' in _gen_src and 'apply_fixes(payload)' in _gen_src)
+t.check('RULE: generator retries once with the gate feedback',
+        'quality_feedback=issues' in _gen_src)
+t.check('RULE: prompt forbids the promotional register',
+        "'specializes in'" in _gen_src and 'connect with us' in _gen_src.lower())
+t.check('RULE: prompt demands a genuine closing question',
+        'ENDS WITH A GENUINE OPEN QUESTION' in _gen_src)
+t.check('RULE: prompt demands short paragraphs, not one block',
+        'BODY FORMATTING' in _gen_src and 'see more' in _gen_src)
+t.check('RULE: prompt bans the worn-out headline vocabulary',
+        "avoid 'cross-border'" in _gen_src)
+
 sys.exit(t.summary())
