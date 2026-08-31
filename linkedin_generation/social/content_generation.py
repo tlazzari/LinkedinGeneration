@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, Optional, Sequence, TYPE_CHECKING
@@ -12,6 +13,9 @@ import random
 
 from .manual_knowledge import build_lubrication_installation_context, build_case_study_context
 from .base_content import GeneratedPost, BaseContentGenerator
+from .post_quality import TNT_VOICE, apply_fixes, post_issues
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from linkedin_generation.holiday.calendars import HolidayEvent
@@ -47,6 +51,39 @@ class LinkedInPostGenerator(BaseContentGenerator):
             max_tokens=650,
         )
         payload = self._parse_response(raw)
+
+        # Same gate as Seta, with TNT's own policy: its direct CTA is wanted, so
+        # only the conversation, formatting, vocabulary and sourcing rules bite.
+        sources = "\n".join(pillar.proof_points or [])
+        issues = post_issues(payload, TNT_VOICE, sources=sources)
+        if issues:
+            logger.warning(
+                "TNT post failed the quality gate (%s) - regenerating once",
+                "; ".join(issues),
+            )
+            retry_raw = self.llm_client.complete(
+                self._build_prompt(
+                    pillar=pillar,
+                    post_type=post_type,
+                    image_mode=image_mode,
+                    holiday=holiday,
+                    quality_feedback=issues,
+                ),
+                temperature=0.8,
+                max_tokens=650,
+            )
+            retry_payload = self._parse_response(retry_raw)
+            if len(post_issues(retry_payload, TNT_VOICE, sources=sources)) < len(issues):
+                payload = retry_payload
+
+        payload = apply_fixes(payload, TNT_VOICE)
+        remaining = post_issues(payload, TNT_VOICE, sources=sources)
+        if remaining:
+            logger.warning(
+                "TNT post published with unresolved quality issues: %s",
+                "; ".join(remaining),
+            )
+
         hashtags = payload.get("hashtags") or []
         if isinstance(hashtags, str):
             hashtags = [tag.strip() for tag in hashtags.split() if tag.strip()]
@@ -85,6 +122,7 @@ class LinkedInPostGenerator(BaseContentGenerator):
         post_type: str,
         image_mode: str,
         holiday: "HolidayEvent" | None = None,
+            quality_feedback: Optional[list] = None,
     ) -> str:
         # Randomly select a subset of proof points to ensure variety across posts
         available_points = list(pillar.proof_points) if pillar.proof_points else []
@@ -231,7 +269,13 @@ class LinkedInPostGenerator(BaseContentGenerator):
             "- Use European spelling (eg, optimise, organisation).\n"
             "- Mention TNT Motion explicitly once.\n"
             "- Reference the relevant industries or scenarios the pillar covers.\n"
-            "- CTA must invite direct conversation (call, WhatsApp, email) or catalogue download.\n"
+            "- CTA must invite direct conversation (call, WhatsApp, email) or catalogue download, "
+            "AND end with a genuine open question an engineer would answer from experience "
+            "(across 107 posts this page drew 0 comments - a question is what the feed amplifies). "
+            "Never the same question twice.\n"
+            "- Every number you state must come from the proof points supplied above. Do NOT "
+            "invent failure costs, tolerances, lifetimes or market figures, and do NOT write "
+            "'studies show' or 'industry data indicates'. Buyers here will check.\n"
             "- Do not reference or link to any external files, websites, or resources unless they appear directly in the post copy.\n"
             "- Finish with 3-5 hashtags chosen from this pool and/or relevant variants: "
             f"{hashtag_pool}.\n"
@@ -242,7 +286,14 @@ class LinkedInPostGenerator(BaseContentGenerator):
             f"{no_invented_numbers_constraint}"
             f"{manual_context}"
             "- VARIATION: Pick ONE proof point from the list above as your starting inspiration. Do NOT reuse the exact same scenario, numbers, or industry from previous posts. Vary the industry (automotive, mining, food processing, energy, HVAC, paper, cement, marine, etc.), the failure mode, and all specific figures each time. Invent plausible but DIFFERENT numbers for each post (vary cost figures, temperatures, timeframes, percentages).\n"
-            "Return JSON only, no extra text."
+            + (
+                "\nYour previous attempt was REJECTED for these reasons - fix every one:\n"
+                + "\n".join(f"- {issue}" for issue in quality_feedback)
+                + "\n"
+                if quality_feedback
+                else ""
+            )
+            + "Return JSON only, no extra text."
         )
 
 __all__ = ["LinkedInPostGenerator", "GeneratedPost"]

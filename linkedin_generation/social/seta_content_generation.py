@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 from .campaign_config import CampaignConfig, PostPillar
 from .news_search import NewsArticle, search_news_for_pillar, build_news_context
 from .base_content import GeneratedPost, BaseContentGenerator
-from .seta_post_quality import apply_fixes, post_issues
+from .post_quality import SETA_VOICE, apply_fixes, post_issues
 
 if TYPE_CHECKING:
     from linkedin_generation.holiday.calendars import HolidayEvent
@@ -73,7 +73,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
 
         # A prompt is a request, not a guarantee: check what came back and give
         # the model one corrective pass before falling back to mechanical fixes.
-        issues = post_issues(payload, sources=sources)
+        issues = post_issues(payload, SETA_VOICE, sources=sources)
         if issues:
             logger.warning(
                 "Seta post failed the quality gate (%s) - regenerating once",
@@ -95,11 +95,11 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             retry_payload = self._strip_urls(
                 self._parse_response(retry_raw), news_articles, post_type
             )
-            if len(post_issues(retry_payload, sources=sources)) < len(issues):
+            if len(post_issues(retry_payload, SETA_VOICE, sources=sources)) < len(issues):
                 payload = retry_payload
 
-        payload = apply_fixes(payload)
-        remaining = post_issues(payload, sources=sources)
+        payload = apply_fixes(payload, SETA_VOICE)
+        remaining = post_issues(payload, SETA_VOICE, sources=sources)
         if remaining:
             logger.warning(
                 "Seta post published with unresolved quality issues: %s",

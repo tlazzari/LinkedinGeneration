@@ -351,11 +351,11 @@ t.check('follower_report.py compiles',
 # to - and 61 of 67 headlines contained "cross-border". The gate below is
 # enforced in code because a prompt alone cannot guarantee any of it.
 sys.path.insert(0, str(PROJECT_ROOT))
-from linkedin_generation.social.seta_post_quality import (   # noqa: E402
-    apply_fixes, post_issues, promotional_hits, reflow_paragraphs,
+from linkedin_generation.social.post_quality import (   # noqa: E402
+    SETA_VOICE, TNT_VOICE, apply_fixes, post_issues, promotional_hits, reflow_paragraphs,
 )
 
-t.check('seta_post_quality.py compiles', py_compile_ok('social/seta_post_quality.py'))
+t.check('post_quality.py compiles', py_compile_ok('social/post_quality.py'))
 
 _old_style = {
     'headline': 'Precision in Cross-Border M&A: Navigating Complexity',
@@ -366,7 +366,7 @@ _old_style = {
     'cta': ('Seta Capital specializes in advising C-suite leaders on transactions between '
             'Europe and China. Connect with us to discuss your strategic objectives.'),
 }
-_issues = post_issues(_old_style)
+_issues = post_issues(_old_style, SETA_VOICE)
 t.check('RULE: gate rejects the old promotional closing',
         any('promotional' in i for i in _issues), str(_issues))
 t.check('RULE: gate rejects a closing with no question',
@@ -376,7 +376,7 @@ t.check('RULE: gate rejects house-cliche headlines',
 t.check('RULE: gate rejects a wall-of-text body',
         any('single block' in i for i in _issues), str(_issues))
 
-_fixed = apply_fixes(_old_style)
+_fixed = apply_fixes(_old_style, SETA_VOICE)
 t.check('RULE: deterministic fix removes every promotional sentence',
         promotional_hits(_fixed['body'] + ' ' + _fixed['cta']) == [],
         repr(_fixed['cta']))
@@ -392,7 +392,7 @@ _good = {
             'What are you seeing on valuations in your own pipeline?'),
 }
 t.check('RULE: a clean insight-led post passes the gate',
-        post_issues(_good) == [], str(post_issues(_good)))
+        post_issues(_good, SETA_VOICE) == [], str(post_issues(_good, SETA_VOICE)))
 
 # decimals and initialisms must not be mistaken for sentence ends
 t.check('RULE: paragraph reflow does not split decimals or initialisms',
@@ -401,7 +401,7 @@ t.check('RULE: paragraph reflow does not split decimals or initialisms',
 
 _gen_src = (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
 t.check('RULE: generator runs the quality gate before publishing',
-        'post_issues(payload' in _gen_src and 'apply_fixes(payload)' in _gen_src)
+        'post_issues(payload' in _gen_src and 'apply_fixes(payload' in _gen_src)
 t.check('RULE: generator retries once with the gate feedback',
         'quality_feedback=issues' in _gen_src)
 t.check('RULE: prompt forbids the promotional register',
@@ -418,7 +418,7 @@ t.check('RULE: prompt bans the worn-out headline vocabulary',
 # investments" citing "recent H1 2026 data from leading industry reports". The
 # pipeline fetches only ECB FX, FRED yields, World Bank GDP and news headlines -
 # that figure was invented, in front of an audience of M&A professionals.
-from linkedin_generation.social.seta_post_quality import (   # noqa: E402
+from linkedin_generation.social.post_quality import (   # noqa: E402
     unsupported_statistics, vague_source_hits,
 )
 
@@ -439,15 +439,60 @@ t.check('RULE: vague attribution to unfetched sources is caught',
 t.check('RULE: sourcing check is skipped when no sources are supplied',
         post_issues({'headline': 'A Specific Claim About German Assets',
                      'body': 'Deals rose 12%.\n\nBuyers paused.',
-                     'cta': 'Seta Capital sees a shift. What do you see?'}) == [])
+                     'cta': 'Seta Capital sees a shift. What do you see?'}, SETA_VOICE) == [])
 
 _gen_src2 = (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
 t.check('RULE: generator passes fetched sources into the gate',
-        'post_issues(payload, sources=sources)' in _gen_src2)
+        'post_issues(payload, SETA_VOICE, sources=sources)' in _gen_src2)
 t.check('RULE: sources include chart data, news context and proof points',
         'chart_data, news_context' in _gen_src2 and 'pillar.proof_points' in _gen_src2)
 t.check('RULE: prompt forbids inventing statistics',
         'SOURCING (non-negotiable)' in _gen_src2
         and 'Do NOT invent deal statistics' in _gen_src2)
+
+# === RULE: the gate is shared, but each brand keeps its own policy ===
+# TNT's prompt deliberately asks for a direct CTA (call, WhatsApp, email,
+# catalogue download) because that page is a sales channel; Seta's posts exist
+# to be reshared from a personal profile, where a pitch disqualifies them.
+_tnt_sales = {'headline': 'Preload Error Cost A Plant Two Days Of Output',
+              'body': 'A 2mm error stopped the line.\n\nPreload was the cause.',
+              'cta': 'Our team can size it for you - WhatsApp us. What failure mode bites you most?'}
+t.check('RULE: TNT keeps its direct sales CTA',
+        post_issues(_tnt_sales, TNT_VOICE, sources='2mm preload') == [],
+        str(post_issues(_tnt_sales, TNT_VOICE, sources='2mm preload')))
+t.check('RULE: the same CTA is rejected for Seta',
+        any('promotional' in i for i in post_issues(_tnt_sales, SETA_VOICE)))
+t.check('RULE: apply_fixes never strips TNT\'s CTA',
+        'WhatsApp' in apply_fixes(_tnt_sales, TNT_VOICE)['cta'])
+t.check('RULE: invented currency amounts are caught',
+        unsupported_statistics('A 2mm error cost the plant EUR200,000.', '2mm preload')
+        == ['200,000'] or
+        unsupported_statistics('A 2mm error cost the plant \u20ac200,000.', '2mm preload') != [])
+t.check('RULE: a sourced currency amount is accepted',
+        unsupported_statistics('The repair cost 200000 euros.', 'repair bill 200000') == [])
+t.check('RULE: TNT vocabulary list is enforced, all-caps is not',
+        any('myth' in i for i in post_issues(
+            {'headline': 'BEARING MYTH BUSTED', 'body': 'A.\n\nB.', 'cta': 'Which one? Call us.'},
+            TNT_VOICE))
+        and not any('caps' in i.lower() for i in post_issues(
+            {'headline': 'PRELOAD FAILURE STOPPED A LINE', 'body': 'A.\n\nB.',
+             'cta': 'Which one bites you? Call us.'}, TNT_VOICE)))
+
+_tnt_src = (PKG_DIR / 'social' / 'content_generation.py').read_text()
+t.check('RULE: TNT generator runs the shared gate',
+        'post_issues(payload, TNT_VOICE' in _tnt_src and 'apply_fixes(payload, TNT_VOICE)' in _tnt_src)
+t.check('RULE: TNT prompt asks for a closing question as well as the CTA',
+        'end with a genuine open question' in _tnt_src)
+t.check('RULE: TNT prompt forbids invented failure costs',
+        'invent failure costs' in _tnt_src)
+
+t.check('RULE: TNT may name itself in the body, Seta may not',
+        post_issues({'headline': 'PRELOAD ERROR STOPPED A LINE',
+                     'body': 'Engineers at TNT Motion traced it.\n\nPreload was wrong.',
+                     'cta': 'WhatsApp us. Which failure bites you most?'},
+                    TNT_VOICE, sources='preload') == []
+        and any('closing paragraph only' in i for i in post_issues(
+            {'headline': 'A Claim', 'body': 'Seta Capital sees a shift.\n\nTwo.',
+             'cta': 'What do you see?'}, SETA_VOICE)))
 
 sys.exit(t.summary())

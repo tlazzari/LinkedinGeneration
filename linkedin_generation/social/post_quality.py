@@ -1,4 +1,4 @@
-"""Deterministic quality gate for Seta Capital LinkedIn posts.
+"""Deterministic quality gate for LinkedIn posts, shared by every brand.
 
 The prompt asks for insight rather than marketing copy, but a prompt is a
 request, not a guarantee. The properties a post must have to be worth resharing
@@ -17,12 +17,22 @@ quietly reintroduce a sales pitch:
 `post_issues()` is pure: it takes the parsed payload and returns human-readable
 problems. The same list is fed back to the model as retry instructions and
 asserted by the test suite, so the contract has exactly one definition.
+
+Everything brand-specific - the company name and the worn-out vocabulary that
+brand has overused - is passed in by the caller, so a new brand needs a
+`BrandVoice` entry and nothing else. The evidence for each brand's tired
+vocabulary is its own post archive, measured 2026-08-31:
+Seta had "cross-border" in 61 of 67 headlines; TNT had "myth" in 19 of 107 and
+"European quality" in 16. Note TNT's all-caps headlines are NOT penalised - its
+two best-reaching posts ever were "20C OVERHEAT: The Silent Killer" (847
+impressions) and "THE EUR200,000 NIGHTMARE" (648), so shouting works there.
 """
 
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Sequence
 
 # Sales register. Checked across the whole post; the closing paragraph may name
 # Seta once, but never sell.
@@ -42,15 +52,53 @@ PROMOTIONAL_PATTERNS = [
     r"\brequest a (?:strategic )?briefing\b",
 ]
 
-# Worn-out headline vocabulary, measured over the Dec 2025 - Aug 2026 archive.
-OVERUSED_HEADLINE_TERMS = [
-    "cross-border",
-    "navigating",
-    "unlocking",
-    "precision",
-    "reshaping",
-    "strategic value",
-]
+@dataclass(frozen=True)
+class BrandVoice:
+    """What the gate needs to know about one brand's copy."""
+
+    name: str                       # as written in posts, e.g. "Seta Capital"
+    overused_headline_terms: Sequence[str]
+    # Seta posts exist to be reshared from a personal profile, so a sales
+    # register disqualifies them. TNT posts are a sales channel whose prompt
+    # deliberately asks for a direct CTA (call, WhatsApp, email, catalogue), so
+    # the promotional check is off there by design - do not "fix" that.
+    ban_promotional: bool = True
+    # Seta keeps the body brand-free so the analysis stands on its own; TNT's
+    # prompt asks for the brand by name in the copy, so placement is free there.
+    brand_in_closing_only: bool = True
+    # Both brands publish into a feed that amplifies conversation: 0 comments
+    # across TNT's 107 posts and 1 across Seta's 67 (measured 2026-08-31).
+    require_closing_question: bool = True
+
+
+# Worn-out headline vocabulary, measured over each brand's own archive.
+SETA_VOICE = BrandVoice(
+    name="Seta Capital",
+    ban_promotional=True,
+    overused_headline_terms=(
+        "cross-border",
+        "navigating",
+        "unlocking",
+        "precision",
+        "reshaping",
+        "strategic value",
+    ),
+)
+
+TNT_VOICE = BrandVoice(
+    name="TNT Motion",
+    ban_promotional=False,
+    brand_in_closing_only=False,
+    overused_headline_terms=(
+        "myth",
+        "european quality",
+        "costing millions",
+        "reliability reimagined",
+        "silent killer",
+    ),
+)
+
+VOICES = {"seta": SETA_VOICE, "tnt": TNT_VOICE}
 
 # Vague attributions that imply a source the pipeline never fetched.
 VAGUE_SOURCE_PATTERNS = [
@@ -66,10 +114,18 @@ VAGUE_SOURCE_PATTERNS = [
 # A statistic worth checking: a percentage, or a number carried to two or more
 # decimals (an FX rate). Bare integers and years are left alone - "H1 2026" and
 # "10-Year Treasury" are labels, not claims.
-_STATISTIC = re.compile(r"\d+(?:\.\d+)?\s*%|\d+\.\d{2,}")
+# A statistic worth checking: a percentage, a number carried to two or more
+# decimals (an FX rate), or a currency amount - TNT's archive is full of
+# invented failure costs ("THE EUR200,000 NIGHTMARE").
+_STATISTIC = re.compile(
+    r"\d[\d,]*(?:\.\d+)?\s*%"
+    r"|[€$£]\s?\d[\d,]*(?:\.\d+)?"
+    r"|\d[\d,]*(?:\.\d+)?\s*(?:euros?|EUR|USD|dollars?|RMB|CNY|GBP|pounds?)\b"
+    r"|\d+\.\d{2,}",
+    re.IGNORECASE,
+)
 _ANY_NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
-BRAND = "seta capital"
 MAX_PARAGRAPH_SENTENCES = 3
 MAX_BODY_WORDS_PER_PARAGRAPH = 60
 
@@ -108,7 +164,7 @@ def unsupported_statistics(text: str, sources: str) -> List[str]:
             continue
     unsupported: List[str] = []
     for claim in statistic_values(text):
-        raw = claim.replace("%", "").strip()
+        raw = re.sub(r"[^\d.]", "", claim)
         try:
             value = float(raw)
         except ValueError:
@@ -129,7 +185,11 @@ def vague_source_hits(text: str) -> List[str]:
     return hits
 
 
-def post_issues(payload: Dict[str, object], sources: Optional[str] = None) -> List[str]:
+def post_issues(
+    payload: Dict[str, object],
+    voice: BrandVoice,
+    sources: Optional[str] = None,
+) -> List[str]:
     """Every reason this post is not repost-worthy. Empty list == publishable.
 
     `sources` is the data actually fetched for this post (chart figures, news
@@ -142,20 +202,24 @@ def post_issues(payload: Dict[str, object], sources: Optional[str] = None) -> Li
     cta = str(payload.get("cta", "") or "")
     whole = f"{headline} {body} {cta}"
 
-    hits = promotional_hits(whole)
-    if hits:
-        issues.append("promotional phrasing - remove " + ", ".join(f"'{h}'" for h in hits))
+    if voice.ban_promotional:
+        hits = promotional_hits(whole)
+        if hits:
+            issues.append("promotional phrasing - remove " + ", ".join(f"'{h}'" for h in hits))
 
-    brand_count = len(re.findall(BRAND, whole, flags=re.IGNORECASE))
+    brand = re.escape(voice.name)
+    brand_count = len(re.findall(brand, whole, flags=re.IGNORECASE))
     if brand_count > 1:
-        issues.append(f"Seta Capital named {brand_count} times - name it at most once")
-    if re.search(BRAND, f"{headline} {body}", flags=re.IGNORECASE):
-        issues.append("Seta Capital appears in the headline or body - closing paragraph only")
+        issues.append(f"{voice.name} named {brand_count} times - name it at most once")
+    if voice.brand_in_closing_only and re.search(
+        brand, f"{headline} {body}", flags=re.IGNORECASE
+    ):
+        issues.append(f"{voice.name} appears in the headline or body - closing paragraph only")
 
-    if "?" not in cta:
+    if voice.require_closing_question and "?" not in cta:
         issues.append("closing paragraph asks no question - end on a genuine open question")
 
-    for term in OVERUSED_HEADLINE_TERMS:
+    for term in voice.overused_headline_terms:
         if term in headline.lower():
             issues.append(f"headline reuses the house cliche '{term}'")
 
@@ -208,7 +272,7 @@ def strip_promotional_sentences(text: str) -> str:
     return " ".join(kept) if kept else ""
 
 
-def apply_fixes(payload: Dict[str, object]) -> Dict[str, object]:
+def apply_fixes(payload: Dict[str, object], voice: BrandVoice) -> Dict[str, object]:
     """Repair mechanically what the model got wrong.
 
     Promotional sentences and wall-of-text bodies are fixed outright. A missing
@@ -216,16 +280,20 @@ def apply_fixes(payload: Dict[str, object]) -> Dict[str, object]:
     that one is left to the retry and merely reported.
     """
     fixed = dict(payload)
-    for name in ("body", "cta"):
-        value = str(fixed.get(name, "") or "")
-        if value:
-            fixed[name] = strip_promotional_sentences(value)
+    if voice.ban_promotional:
+        for name in ("body", "cta"):
+            value = str(fixed.get(name, "") or "")
+            if value:
+                fixed[name] = strip_promotional_sentences(value)
     fixed["body"] = reflow_paragraphs(str(fixed.get("body", "") or ""))
     return fixed
 
 
 __all__ = [
-    "OVERUSED_HEADLINE_TERMS",
+    "BrandVoice",
+    "SETA_VOICE",
+    "TNT_VOICE",
+    "VOICES",
     "PROMOTIONAL_PATTERNS",
     "VAGUE_SOURCE_PATTERNS",
     "statistic_values",
