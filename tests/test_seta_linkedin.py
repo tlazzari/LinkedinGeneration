@@ -401,7 +401,7 @@ t.check('RULE: paragraph reflow does not split decimals or initialisms',
 
 _gen_src = (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
 t.check('RULE: generator runs the quality gate before publishing',
-        'post_issues(payload)' in _gen_src and 'apply_fixes(payload)' in _gen_src)
+        'post_issues(payload' in _gen_src and 'apply_fixes(payload)' in _gen_src)
 t.check('RULE: generator retries once with the gate feedback',
         'quality_feedback=issues' in _gen_src)
 t.check('RULE: prompt forbids the promotional register',
@@ -412,5 +412,42 @@ t.check('RULE: prompt demands short paragraphs, not one block',
         'BODY FORMATTING' in _gen_src and 'see more' in _gen_src)
 t.check('RULE: prompt bans the worn-out headline vocabulary',
         "avoid 'cross-border'" in _gen_src)
+
+# === RULE: every statistic must trace back to the fetched data ===
+# The 2026-08-25 post asserted "Q2 2026 saw a 12% increase in minority stake
+# investments" citing "recent H1 2026 data from leading industry reports". The
+# pipeline fetches only ECB FX, FRED yields, World Bank GDP and news headlines -
+# that figure was invented, in front of an audience of M&A professionals.
+from linkedin_generation.social.seta_post_quality import (   # noqa: E402
+    unsupported_statistics, vague_source_hits,
+)
+
+_sources = ('EUR/CNY 7.8422 from 8.0071, change -2.06 percent. '
+            'US 10Y 4.49 from 4.05. Germany GDP 0.2, Italy 0.5.')
+
+t.check('RULE: invented statistics are caught',
+        unsupported_statistics('Q2 2026 saw a 12% increase in minority stakes.', _sources) == ['12%'])
+t.check('RULE: real fetched figures are accepted',
+        unsupported_statistics('EUR/CNY moved to 7.8422 while the 10-year hit 4.49%.', _sources) == [])
+t.check('RULE: a rounded quote of a fetched figure is accepted',
+        unsupported_statistics('EUR/CNY is around 7.84 today.', _sources) == [])
+t.check('RULE: years and labels are not treated as statistics',
+        unsupported_statistics('In H1 2026 the 10-Year Treasury mattered.', _sources) == [])
+t.check('RULE: vague attribution to unfetched sources is caught',
+        vague_source_hits('Recent reports indicate a shift.') != []
+        and vague_source_hits('Analysts estimate further tightening.') != [])
+t.check('RULE: sourcing check is skipped when no sources are supplied',
+        post_issues({'headline': 'A Specific Claim About German Assets',
+                     'body': 'Deals rose 12%.\n\nBuyers paused.',
+                     'cta': 'Seta Capital sees a shift. What do you see?'}) == [])
+
+_gen_src2 = (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
+t.check('RULE: generator passes fetched sources into the gate',
+        'post_issues(payload, sources=sources)' in _gen_src2)
+t.check('RULE: sources include chart data, news context and proof points',
+        'chart_data, news_context' in _gen_src2 and 'pillar.proof_points' in _gen_src2)
+t.check('RULE: prompt forbids inventing statistics',
+        'SOURCING (non-negotiable)' in _gen_src2
+        and 'Do NOT invent deal statistics' in _gen_src2)
 
 sys.exit(t.summary())

@@ -22,7 +22,7 @@ asserted by the test suite, so the contract has exactly one definition.
 from __future__ import annotations
 
 import re
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # Sales register. Checked across the whole post; the closing paragraph may name
 # Seta once, but never sell.
@@ -52,6 +52,23 @@ OVERUSED_HEADLINE_TERMS = [
     "strategic value",
 ]
 
+# Vague attributions that imply a source the pipeline never fetched.
+VAGUE_SOURCE_PATTERNS = [
+    r"\brecent (?:reports?|data|studies|analysis)\b",
+    r"\b(?:leading |industry |market )?reports? (?:indicate|show|suggest|confirm)\b",
+    r"\bdata (?:from|indicates?|shows?|suggests?)\b",
+    r"\bstudies show\b",
+    r"\banalysts? (?:estimate|expect|predict)\b",
+    r"\baccording to (?:recent|leading|industry|market)\b",
+    r"\bsurveys? (?:indicate|show)\b",
+]
+
+# A statistic worth checking: a percentage, or a number carried to two or more
+# decimals (an FX rate). Bare integers and years are left alone - "H1 2026" and
+# "10-Year Treasury" are labels, not claims.
+_STATISTIC = re.compile(r"\d+(?:\.\d+)?\s*%|\d+\.\d{2,}")
+_ANY_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+
 BRAND = "seta capital"
 MAX_PARAGRAPH_SENTENCES = 3
 MAX_BODY_WORDS_PER_PARAGRAPH = 60
@@ -71,8 +88,54 @@ def promotional_hits(text: str) -> List[str]:
     return hits
 
 
-def post_issues(payload: Dict[str, object]) -> List[str]:
-    """Every reason this post is not repost-worthy. Empty list == publishable."""
+def statistic_values(text: str) -> List[str]:
+    """Percentages and precise decimals asserted in text, as written."""
+    return [m.group(0).strip() for m in _STATISTIC.finditer(text)]
+
+
+def unsupported_statistics(text: str, sources: str) -> List[str]:
+    """Statistics in text that do not trace back to the fetched data.
+
+    A claim counts as supported when some number in the sources equals it at the
+    claim's own precision, so quoting 7.84 from a fetched 7.8422 is fine while
+    inventing "a 12% increase" is not.
+    """
+    available = []
+    for match in _ANY_NUMBER.finditer(sources or ""):
+        try:
+            available.append(float(match.group(0)))
+        except ValueError:
+            continue
+    unsupported: List[str] = []
+    for claim in statistic_values(text):
+        raw = claim.replace("%", "").strip()
+        try:
+            value = float(raw)
+        except ValueError:
+            continue
+        decimals = len(raw.split(".")[1]) if "." in raw else 0
+        if not any(round(source, decimals) == value for source in available):
+            unsupported.append(claim)
+    return unsupported
+
+
+def vague_source_hits(text: str) -> List[str]:
+    """Phrases implying a source the pipeline cannot have fetched."""
+    hits: List[str] = []
+    for pattern in VAGUE_SOURCE_PATTERNS:
+        found = re.search(pattern, text, flags=re.IGNORECASE)
+        if found:
+            hits.append(found.group(0))
+    return hits
+
+
+def post_issues(payload: Dict[str, object], sources: Optional[str] = None) -> List[str]:
+    """Every reason this post is not repost-worthy. Empty list == publishable.
+
+    `sources` is the data actually fetched for this post (chart figures, news
+    context, curated proof points). Pass it to check that every statistic the
+    post asserts traces back to real data; omit it to skip that check.
+    """
     issues: List[str] = []
     headline = str(payload.get("headline", "") or "")
     body = str(payload.get("body", "") or "")
@@ -106,6 +169,21 @@ def post_issues(payload: Dict[str, object]) -> List[str]:
                 f"{MAX_BODY_WORDS_PER_PARAGRAPH}"
             )
             break
+
+    if sources is not None:
+        whole_text = f"{headline} {body} {cta}"
+        invented = unsupported_statistics(whole_text, sources)
+        if invented:
+            issues.append(
+                "statistics with no source in the fetched data — remove or replace "
+                + ", ".join(f"'{claim}'" for claim in invented)
+            )
+        vague = vague_source_hits(whole_text)
+        if vague:
+            issues.append(
+                "vague attribution to sources the pipeline never fetched — remove "
+                + ", ".join(f"'{hit}'" for hit in vague)
+            )
     return issues
 
 
@@ -149,6 +227,10 @@ def apply_fixes(payload: Dict[str, object]) -> Dict[str, object]:
 __all__ = [
     "OVERUSED_HEADLINE_TERMS",
     "PROMOTIONAL_PATTERNS",
+    "VAGUE_SOURCE_PATTERNS",
+    "statistic_values",
+    "unsupported_statistics",
+    "vague_source_hits",
     "apply_fixes",
     "post_issues",
     "promotional_hits",

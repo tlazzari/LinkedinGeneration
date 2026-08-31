@@ -61,11 +61,19 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             temperature=0.8,
             max_tokens=800,
         )
+        # Everything the post is allowed to cite: fetched chart figures, news
+        # context and the human-curated proof points from the campaign YAML.
+        sources = "\n".join(
+            part
+            for part in (chart_data, news_context, "\n".join(pillar.proof_points))
+            if part
+        )
+
         payload = self._strip_urls(self._parse_response(raw), news_articles, post_type)
 
         # A prompt is a request, not a guarantee: check what came back and give
         # the model one corrective pass before falling back to mechanical fixes.
-        issues = post_issues(payload)
+        issues = post_issues(payload, sources=sources)
         if issues:
             logger.warning(
                 "Seta post failed the quality gate (%s) - regenerating once",
@@ -87,11 +95,11 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             retry_payload = self._strip_urls(
                 self._parse_response(retry_raw), news_articles, post_type
             )
-            if len(post_issues(retry_payload)) < len(issues):
+            if len(post_issues(retry_payload, sources=sources)) < len(issues):
                 payload = retry_payload
 
         payload = apply_fixes(payload)
-        remaining = post_issues(payload)
+        remaining = post_issues(payload, sources=sources)
         if remaining:
             logger.warning(
                 "Seta post published with unresolved quality issues: %s",
@@ -311,6 +319,12 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             "- HEADLINE: do NOT use the worn-out house vocabulary - avoid 'cross-border', 'navigating', "
             "'unlocking', 'precision', 'reshaping' and 'strategic value'. Lead with the specific claim, "
             "number or tension of THIS post so it does not read like every previous one.\n"
+            "- SOURCING (non-negotiable): every number you state must come from the data "
+            "supplied above. Do NOT invent deal statistics, market sizes, growth rates or "
+            "percentages, and do NOT write 'recent reports indicate', 'industry data shows' "
+            "or 'analysts estimate' — the pipeline fetches only ECB FX rates, FRED yields, "
+            "World Bank GDP and the news headlines given. If you have no figure for a point, "
+            "make it qualitatively; readers here are M&A professionals who will check.\n"
             "- NEVER include political commentary or negative remarks about any country.\n"
             "- Finish with 3-5 hashtags from this pool: "
             f"{hashtag_pool}.\n"
