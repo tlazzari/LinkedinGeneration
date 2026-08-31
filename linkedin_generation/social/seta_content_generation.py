@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 class SetaLinkedInPostGenerator(BaseContentGenerator):
+
+    brand_key = "seta"
     """Delegate that orchestrates prompt building and parsing for Seta Capital.
 
     Shared GeneratedPost / __init__ / _parse_response / _merge_hashtags live in
@@ -177,6 +179,9 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         chart_data: str = "",
             quality_feedback: Optional[List[str]] = None,
     ) -> str:
+        from .brand_store import extra_context
+
+        brand_material = extra_context(self.brand_key)
         proof_points = "\n".join(f"- {item}" for item in pillar.proof_points) or "- Strategic M&A advisory\n- Cross-border expertise"
         ctas = ", ".join(pillar.ctas or ["Connect with our advisory team", "Request a strategic briefing"])
         hashtag_pool = " ".join(self._merge_hashtags([], pillar))
@@ -293,7 +298,13 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             f"Apply these directives:\n{post_directives}\n"
             f"{news_requirements}"
             f"{chart_requirements}"
-            "\nOutput must be JSON with keys headline, body, cta, hashtags (list), image_prompt, video_prompt, alt_text.\n"
+            + (
+                f"\nCOMPANY-SPECIFIC MATERIAL (supplied by the account owner - treat as "
+                f"authoritative for facts about this company):\n{brand_material}\n"
+                if brand_material
+                else ""
+            )
+            +             "\nOutput must be JSON with keys headline, body, cta, hashtags (list), image_prompt, video_prompt, alt_text.\n"
             "POST STRUCTURE (mandatory, applies to every pillar):\n"
             "- The post has TWO parts: (1) the BODY and (2) a single final paragraph in the 'cta' field.\n"
             "- BODY = authoritative, expert analysis in a thought-leadership voice. It must NOT mention "

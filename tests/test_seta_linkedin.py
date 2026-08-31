@@ -563,4 +563,102 @@ t.check('RULE: post_type reaches the gate so holidays are exempt in production',
         'post_type=post_type' in (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
         and 'post_type=post_type' in (PKG_DIR / 'social' / 'content_generation.py').read_text())
 
+# === RULE: pages configured in the CRM reach the pipeline intact ===
+# /social-standalone/ writes one JSON file per page into config/brands/; the
+# pipeline merges them over the code registry at import. A malformed or
+# half-written file must never take down an 08:00 scheduled run.
+import json as _json, tempfile as _tf, importlib as _il   # noqa: E402
+from dataclasses import FrozenInstanceError   # noqa: E402
+from linkedin_generation.social import brand_store as _bs   # noqa: E402
+from linkedin_generation.social.brand import BRANDS   # noqa: E402
+
+_orig_dir = _bs.BRAND_DIR
+_tmp = Path(_tf.mkdtemp(prefix='brandstore_'))
+_bs.BRAND_DIR = _tmp
+try:
+    # tone presets are the contract the CRM radio buttons rely on
+    t.check('RULE: reshareable tone bans sales language',
+            _bs.TONE_PRESETS['reshareable']['ban_promotional'] is True
+            and _bs.TONE_PRESETS['reshareable']['require_closing_question'] is True)
+    t.check('RULE: promotional tone allows a direct CTA',
+            _bs.TONE_PRESETS['promotional']['ban_promotional'] is False
+            and _bs.TONE_PRESETS['promotional']['brand_in_closing_only'] is False)
+    t.check('RULE: announcement tone requires no question',
+            _bs.TONE_PRESETS['announcement']['require_closing_question'] is False)
+
+    _v = _bs.voice_from_config({'display_name': 'Acme Srl', 'tone': 'promotional',
+                                'voice': {'overused_headline_terms': ['Myth'],
+                                          'max_filler_per_100_words': 2.0}})
+    t.check('RULE: a preset overrides saved switches',
+            _v.ban_promotional is False and _v.name == 'Acme Srl')
+    t.check('RULE: banned terms are normalised to lowercase',
+            _v.overused_headline_terms == ('myth',))
+
+    _c = _bs.voice_from_config({'display_name': 'Acme', 'tone': 'custom',
+                                'voice': {'ban_promotional': False,
+                                          'brand_in_closing_only': True,
+                                          'require_closing_question': False}})
+    t.check('RULE: custom tone keeps each switch as saved',
+            _c.ban_promotional is False and _c.brand_in_closing_only is True
+            and _c.require_closing_question is False)
+
+    # a new page appears in the registry without any code change
+    (_tmp / 'acme.json').write_text(_json.dumps({
+        'key': 'acme', 'display_name': 'Acme Bearings', 'template': 'tnt',
+        'tone': 'promotional', 'enabled': True,
+        'example_posts': ['An exemplar.'], 'strategy': 'Bearings for CNC.',
+        'proof_points': ['48h from Turin'], 'material': [{'name': 'p.pdf', 'text': 'Founded 1998.'}],
+    }))
+    # a disabled page must NOT appear
+    (_tmp / 'dormant.json').write_text(_json.dumps({
+        'key': 'dormant', 'display_name': 'Dormant Co', 'template': 'tnt', 'enabled': False}))
+    # a half-written file must be skipped, not raise
+    (_tmp / 'broken.json').write_text('{"key": "broken", "display_nam')
+
+    _applied = _bs.apply_configs()
+    t.check('RULE: a CRM-configured page joins the registry',
+            'acme' in _applied and 'acme' in BRANDS, str(_applied))
+    t.check('RULE: a paused page is not registered',
+            'dormant' not in _applied and 'dormant' not in BRANDS)
+    t.check('RULE: a half-written config is skipped, not fatal',
+            'broken' not in _applied)
+    t.check('RULE: a new page clones its template pipeline',
+            BRANDS['acme'].generator is BRANDS['tnt'].generator
+            and BRANDS['acme'].rotation_state_file == 'acme_scheduler_state.json')
+    t.check('RULE: the new page gets its own tone',
+            BRANDS['acme'].voice.ban_promotional is False
+            and BRANDS['acme'].voice.name == 'Acme Bearings')
+
+    _ctx = _bs.extra_context('acme')
+    t.check('RULE: example posts lead the material (strongest voice anchor)',
+            _ctx.index('exemplar') < _ctx.index('Bearings for CNC'), _ctx[:80])
+    t.check('RULE: all four material kinds reach the prompt',
+            all(x in _ctx for x in ('An exemplar.', 'Bearings for CNC', '48h from Turin', 'Founded 1998')))
+    t.check('RULE: material is truncated to protect the prompt budget',
+            len(_bs.extra_context('acme', max_chars=50)) < 120)
+    t.check('RULE: an unknown page yields no material',
+            _bs.extra_context('nosuchbrand') == '')
+
+    # overriding a built-in changes its voice but not its pipeline
+    (_tmp / 'seta.json').write_text(_json.dumps({
+        'key': 'seta', 'display_name': 'Seta Capital', 'tone': 'announcement', 'enabled': True}))
+    _before = BRANDS['seta'].generator
+    _bs.apply_configs()
+    t.check('RULE: overriding a built-in changes tone, not pipeline',
+            BRANDS['seta'].generator is _before
+            and BRANDS['seta'].voice.require_closing_question is False)
+finally:
+    _bs.BRAND_DIR = _orig_dir
+    import shutil as _sh
+    _sh.rmtree(_tmp, ignore_errors=True)
+    for _k in ('acme', 'dormant'):
+        BRANDS.pop(_k, None)
+    _bs.apply_configs()   # restore real state for anything downstream
+
+t.check('RULE: the store is loaded by the package, not by each caller',
+        'apply_configs()' in (PKG_DIR / 'social' / '__init__.py').read_text())
+t.check('RULE: both generators feed brand material into the prompt',
+        'brand_material' in (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
+        and 'brand_material' in (PKG_DIR / 'social' / 'content_generation.py').read_text())
+
 sys.exit(t.summary())

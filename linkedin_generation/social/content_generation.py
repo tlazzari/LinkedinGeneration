@@ -25,6 +25,8 @@ TNT_LOGO_URL = "https://tntbearings.com/wp-content/uploads/2025/09/TNT-M%E6%9C%8
 
 
 class LinkedInPostGenerator(BaseContentGenerator):
+
+    brand_key = "tnt"
     """Delegate that orchestrates prompt building and parsing.
 
     Shared GeneratedPost / __init__ / _parse_response / _merge_hashtags live in
@@ -130,6 +132,9 @@ class LinkedInPostGenerator(BaseContentGenerator):
             selected_points = random.sample(available_points, 3)
         else:
             selected_points = available_points
+        from .brand_store import extra_context
+
+        brand_material = extra_context(self.brand_key)
         proof_points = "\n".join(f"- {item}" for item in selected_points) or "- Reliable delivery timelines\n- Application engineering support"
         ctas = ", ".join(pillar.ctas or ["Book a technical call", "Request a tailored quotation", "Send us your bearing list for cross-reference"])
         hashtag_pool = " ".join(self._merge_hashtags([], pillar))
@@ -263,7 +268,13 @@ class LinkedInPostGenerator(BaseContentGenerator):
             f"Tone guidance: {self.campaign.tone}.\n"
             f"Apply these directives:\n{post_directives}\n"
             "Output must be JSON with keys headline, body, cta, hashtags (list), image_prompt, video_prompt, alt_text.\n"
-            "Constraints:\n"
+            + (
+                f"\nCOMPANY-SPECIFIC MATERIAL (supplied by the account owner - treat as "
+                f"authoritative for facts about this company):\n{brand_material}\n"
+                if brand_material
+                else ""
+            )
+            +             "Constraints:\n"
             "- Keep total post length strictly under 150 words across headline + body + CTA combined. Be punchy and concise — LinkedIn readers scroll fast.\n"
             "- Open with an attention-grabbing hook line (uppercase allowed).\n"
             "- WRITE CONCRETELY. Banned as padding: strategic, complex, dynamic, landscape, evolving, robust, leverage, nuanced, intricate, crucial, comprehensive, seamless, cutting-edge, unparalleled, paramount, holistic, value-add. Across this page's archive every post averaged 5 such words per 100 - which is why they all read the same. Name the country, the sector, the component, the situation. A sentence that would still be true for a different company in a different industry is padding: cut it.\n"
