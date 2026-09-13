@@ -447,6 +447,13 @@ def run_single_generation(
 
     if post.news_articles:
         extra_metadata["news_sources"] = ", ".join(a.source for a in post.news_articles)
+        # The URLs too, not just the outlet names. The first live run (2026-09-13)
+        # had its source comment rejected and there was no way to replay it from
+        # the artifact: only the names had been saved. This is also the audit
+        # trail for what a given post was actually built on.
+        extra_metadata["news_urls"] = " | ".join(
+            f"{a.source}: {a.url}" for a in post.news_articles if a.url
+        )
     elif pillar.use_news_search and post_type != "holiday":
         # LOUD, and greppable. Between 2026-08-20 and 2026-09-13 every news pillar
         # ran with zero articles and published anyway: the post still went out, the

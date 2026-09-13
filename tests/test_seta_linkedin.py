@@ -57,6 +57,7 @@ t.check('RULE: media_type tracked in metadata',
         'media_type' in src)
 
 # === RULE: Video publishing must be wired in the publisher ===
+sched_src = (PKG_DIR / 'seta_post_scheduler.py').read_text()
 client_src = (PKG_DIR / 'social' / 'linkedin_client.py').read_text()
 t.check('RULE: publish_video_post method present in publisher',
         'def publish_video_post' in client_src)
@@ -761,8 +762,18 @@ t.check('RULE: the comment URN is path-encoded',
         'quote(share_urn, safe="")' in client_src)
 t.check('RULE: a failed comment never fails the run',
         'must NEVER fail the run' in client_src)
+# A post is not commentable the instant ugcPosts returns its URN. The first live
+# run commented 391 ms after publishing and got 404 "from domain authorization
+# endpoint"; the identical call a minute later returned 201. Without the backoff
+# the source link would be lost on every single post.
+t.check('RULE: the source comment backs off and retries (404 = not propagated yet)',
+        'delays = (3, 8, 20, 40)' in client_src
+        and '(403, 404, 429, 500, 503)' in client_src)
+t.check('RULE: a non-retryable status stops the retry loop',
+        'break' in client_src.split('def comment_on_post')[1].split('def ')[0])
+t.check('RULE: the artifact records the article URLs, not just the outlet names',
+        'news_urls' in sched_src)
 
-sched_src = (PKG_DIR / 'seta_post_scheduler.py').read_text()
 t.check('RULE: a news pillar that found nothing raises NEWS_OUTAGE',
         'NEWS_OUTAGE' in sched_src)
 t.check('RULE: the source comment is posted after publishing',

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -285,18 +286,40 @@ class LinkedInPublisher:
         # separator and the call 404s.
         encoded = quote(share_urn, safe="")
         url = f"{LINKEDIN_API_BASE}/socialActions/{encoded}/comments"
-        try:
-            response = requests.post(url, json=payload, headers=self._headers(), timeout=30)
-            response.raise_for_status()
-            logging.info("Posted source link as first comment on %s", share_urn)
-            return response.json()
-        except Exception as exc:
-            body = getattr(getattr(exc, "response", None), "text", "")
-            logging.warning(
-                "Could not post the source-link comment on %s: %s %s",
-                share_urn, exc, body[:300],
-            )
-            return None
+
+        # A post is NOT commentable the instant ugcPosts returns its URN. The
+        # first live run (2026-09-13) commented 391 ms after publishing and got
+        # 404 "Received error ... from domain authorization endpoint"; the exact
+        # same call replayed a minute later returned 201. So back off and retry,
+        # and treat 404/403 as "not propagated yet" rather than as fatal.
+        delays = (3, 8, 20, 40)
+        last = ""
+        for attempt, delay in enumerate(delays, start=1):
+            time.sleep(delay)
+            try:
+                response = requests.post(
+                    url, json=payload, headers=self._headers(), timeout=30
+                )
+                if response.status_code in (200, 201):
+                    logging.info(
+                        "Posted source link as first comment on %s (attempt %d)",
+                        share_urn, attempt,
+                    )
+                    return response.json()
+                last = f"{response.status_code} {response.text[:200]}"
+                if response.status_code not in (403, 404, 429, 500, 503):
+                    break
+                logging.info(
+                    "Comment not accepted yet on %s (%s) - retrying",
+                    share_urn, response.status_code,
+                )
+            except Exception as exc:
+                last = str(exc)
+        logging.warning(
+            "Could not post the source-link comment on %s after %d attempts: %s",
+            share_urn, len(delays), last[:300],
+        )
+        return None
 
     def delete_post(self, urn: str) -> int:
         """Delete a published post by its share/ugcPost URN.
