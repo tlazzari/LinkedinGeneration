@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 import requests
 
@@ -261,6 +262,41 @@ class LinkedInPublisher:
         response.raise_for_status()
         return response.json()
 
+
+    def comment_on_post(self, *, share_urn: str, text: str) -> Optional[Dict[str, Any]]:
+        """Add a comment to a published post — used for the source link.
+
+        The source article link is published here rather than in the post body:
+        LinkedIn suppresses the reach of posts carrying an outbound link, and the
+        first comment is the standard way round it (decided 2026-09-13).
+
+        Returns the API response, or None if commenting failed. A failed comment
+        must NEVER fail the run: the post itself is already live, and losing the
+        link is far better than a stack trace after publishing.
+        """
+        if not share_urn or not text.strip():
+            return None
+        payload = {
+            "actor": self.config.owner_urn,
+            "object": share_urn,
+            "message": {"text": text.strip()[:1250]},
+        }
+        # The URN has to be path-encoded; an unescaped ':' is read as a path
+        # separator and the call 404s.
+        encoded = quote(share_urn, safe="")
+        url = f"{LINKEDIN_API_BASE}/socialActions/{encoded}/comments"
+        try:
+            response = requests.post(url, json=payload, headers=self._headers(), timeout=30)
+            response.raise_for_status()
+            logging.info("Posted source link as first comment on %s", share_urn)
+            return response.json()
+        except Exception as exc:
+            body = getattr(getattr(exc, "response", None), "text", "")
+            logging.warning(
+                "Could not post the source-link comment on %s: %s %s",
+                share_urn, exc, body[:300],
+            )
+            return None
 
     def delete_post(self, urn: str) -> int:
         """Delete a published post by its share/ugcPost URN.

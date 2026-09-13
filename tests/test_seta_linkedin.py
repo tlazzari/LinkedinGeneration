@@ -124,11 +124,16 @@ t.check('RULE: at least one pillar uses static image (Imagen fallback path exerc
         len(photo_pillars) >= 1)
 
 # === RULE: seta_content_generation fake-URL prevention ===
+# Updated 2026-09-13: the safety net used to run only when NO news was found,
+# because the prompt asked for a link in the body whenever news existed. The
+# link now goes in the first comment (LinkedIn demotes posts with an outbound
+# link), so NO url may ever reach the body and the net always runs. Same intent,
+# stricter rule.
 gen_src = (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
 t.check('RULE: URL-stripping safety net present in content generator',
-        'url_pattern' in gen_src and 'hallucinated' in gen_src)
-t.check('RULE: no-URL directive when news unavailable',
-        'Do NOT include any external links' in gen_src)
+        'url_pattern' in gen_src and 'Strip URLs from the post body' in gen_src)
+t.check('RULE: the body is told never to paste a URL, news or no news',
+        'Do NOT paste any URL in the post body' in gen_src)
 
 # === Bin script ===
 bin_script = PROJECT_ROOT / 'bin' / 'run_daily_seta.sh'
@@ -660,5 +665,143 @@ t.check('RULE: the store is loaded by the package, not by each caller',
 t.check('RULE: both generators feed brand material into the prompt',
         'brand_material' in (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
         and 'brand_material' in (PKG_DIR / 'social' / 'content_generation.py').read_text())
+
+# ============================================================================
+# NEWS PIPELINE — added 2026-09-13 after a three-week silent outage
+# ============================================================================
+# From 2026-08-20 to 2026-09-13 every news-driven Seta post was generated with
+# ZERO news articles. The posts still published, the cron sentinel was still
+# touched and the health check still passed, so from outside it looked like a
+# working system producing increasingly generic copy. The only news test in this
+# file was that news_search.py existed on disk.
+#
+# Two faults, both invisible without a live call:
+#   1. gemini-2.5-flash spent the whole maxOutputTokens=2000 budget on thinking
+#      tokens, so every reply was finishReason=MAX_TOKENS, truncated mid-URL,
+#      and the JSON parse failed.
+#   2. Grounded Gemini only ever returns vertexaisearch redirect URLs, which the
+#      code deliberately discarded — so even an untruncated reply yielded none.
+# The fallbacks could not save it: they look for SERPER_API_KEY / TAVILY_API_KEY
+# / Google Custom Search, none of which are configured, while the SERP_API_KEY
+# that IS configured was never read.
+#
+# So: the tests below make a REAL call. They are the point of this section.
+
+news_src = (PKG_DIR / 'social' / 'news_search.py').read_text()
+
+# --- the specific regressions, pinned mechanically ---
+t.check('RULE: news search reads SERP_API_KEY (the key that is actually set)',
+        'os.getenv("SERP_API_KEY")' in news_src)
+t.check('RULE: Gemini search does not spend its whole budget on thinking tokens',
+        '"thinkingConfig": {"thinkingBudget": 0}' in news_src)
+t.check('RULE: Gemini maxOutputTokens is no longer the 2000 that always truncated',
+        '"maxOutputTokens": 2000,' not in news_src)
+t.check('RULE: grounding redirects are resolved, never discarded',
+        'def resolve_publisher_url' in news_src
+        and 'Skipping Google redirect URL' not in news_src)
+t.check('RULE: grounded replies are read from ALL parts, not parts[0]',
+        'for p in parts' in news_src)
+t.check('RULE: Chinese queries exist and are tried first',
+        'PILLAR_SEARCH_QUERIES_ZH' in news_src and 'PREFERRED_SOURCES_ZH' in news_src)
+t.check('RULE: stale articles are dropped',
+        'MAX_ARTICLE_AGE_DAYS' in news_src)
+
+# --- unit behaviour, no network ---
+# run_daily_seta.sh puts BOTH the project and commonlib on PYTHONPATH; add them
+# here too so the suite works when invoked bare (run_all_tests.sh does not set
+# PYTHONPATH). Without this the scheduler import below raised ModuleNotFoundError,
+# the suite died before printing its summary, and run_all_tests.sh scored the
+# whole Seta suite as "0 passed, 0 failed" WITH A GREEN TICK.
+sys.path.insert(0, str(PKG_DIR.parent))
+sys.path.insert(0, os.getenv('COMMONLIB_ROOT', '/opt/commonlib'))
+from linkedin_generation.social.news_search import (
+    parse_relative_age, extract_source_name, build_news_context, NewsArticle,
+    provider_health,
+)
+
+t.check('date parse: Chinese relative dates ("4 天前", "3 周前")',
+        parse_relative_age('4 天前') == 4 and parse_relative_age('3 周前') == 21)
+t.check('date parse: English relative dates',
+        parse_relative_age('2 days ago') == 2 and parse_relative_age('1 week ago') == 7)
+t.check('date parse: nonsense is None, not 0',
+        parse_relative_age('') is None and parse_relative_age('whenever') is None)
+t.check('source names: subdomains resolve to the real outlet',
+        extract_source_name('http://auto.cnfol.com/x') == 'CnFol (中金在线)'
+        and extract_source_name('https://finance.sina.com.cn/y') == 'Sina Finance (新浪财经)')
+t.check('source names: Western wires still resolve',
+        extract_source_name('https://www.reuters.com/a') == 'Reuters')
+
+_a = NewsArticle(title='T', url='https://example.com/story', source='S',
+                 summary='body', published_date='9 September 2026', language='zh')
+_ctx = build_news_context([_a])
+t.check('RULE: the prompt is never given a URL (links go in the first comment)',
+        'https://example.com/story' not in _ctx)
+t.check('RULE: the prompt demands outlet + date attribution',
+        'OUTLET' in _ctx and "Never 'recent reports'" in _ctx)
+
+from linkedin_generation.seta_post_scheduler import build_source_comment
+_comment = build_source_comment([_a])
+t.check('RULE: the first comment carries the REAL article link',
+        'https://example.com/story' in _comment and 'in Chinese' in _comment)
+t.check('RULE: no articles means no empty comment is posted',
+        build_source_comment([]) == '')
+
+gen_src = (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
+t.check('RULE: the prompt no longer asks for a URL in the post body',
+        'Include the FULL URL' not in gen_src)
+t.check('RULE: URLs are stripped from the body even when news WAS found',
+        'if post_type == "holiday":\n            return payload' in gen_src)
+t.check('RULE: the post must open on an event, not a theme',
+        'is a failed post' in gen_src)
+
+client_src = (PKG_DIR / 'social' / 'linkedin_client.py').read_text()
+t.check('RULE: the publisher can post the source link as a first comment',
+        'def comment_on_post' in client_src and 'socialActions' in client_src)
+t.check('RULE: the comment URN is path-encoded',
+        'quote(share_urn, safe="")' in client_src)
+t.check('RULE: a failed comment never fails the run',
+        'must NEVER fail the run' in client_src)
+
+sched_src = (PKG_DIR / 'seta_post_scheduler.py').read_text()
+t.check('RULE: a news pillar that found nothing raises NEWS_OUTAGE',
+        'NEWS_OUTAGE' in sched_src)
+t.check('RULE: the source comment is posted after publishing',
+        'comment_on_post(' in sched_src)
+
+# --- the outage alarm: did a recent run publish generic filler? ---
+_seta_log = PROJECT_ROOT / 'logs' / 'seta.log'
+if _seta_log.exists():
+    import time as _time
+    _cutoff = _time.time() - 21 * 86400
+    _recent_outage = False
+    if _seta_log.stat().st_mtime > _cutoff:
+        _tail = _seta_log.read_text(errors='replace')[-400_000:]
+        _recent_outage = 'NEWS_OUTAGE' in _tail
+    t.check('no NEWS_OUTAGE in the recent Seta log (a post went out with no news)',
+            not _recent_outage)
+
+# --- THE LIVE CHECK: do the tools actually work right now? ---
+# Skipped only when the keys are absent (e.g. a checkout without .env); when they
+# are present this MUST make a real call. A structural test cannot catch a model
+# changing its token accounting, which is exactly what broke this pipeline.
+if os.getenv('SERP_API_KEY') or os.getenv('GOOGLE_API_KEY'):
+    _health = provider_health()
+    _counts = {k: v for k, v in _health.items() if isinstance(v, int)}
+    t.check('LIVE: at least one news provider returns articles right now (%s)' % _health,
+            any(v > 0 for v in _counts.values()))
+    if os.getenv('SERP_API_KEY'):
+        t.check('LIVE: the Chinese-language search returns articles (%s)' % _health.get('serpapi_zh'),
+                isinstance(_health.get('serpapi_zh'), int) and _health['serpapi_zh'] > 0)
+
+    from linkedin_generation.social.news_search import search_news_for_pillar
+    _arts = search_news_for_pillar('M&A Insights', num_articles=3)
+    t.check('LIVE: the M&A pillar gets real articles end to end (%d)' % len(_arts), len(_arts) > 0)
+    if _arts:
+        t.check('LIVE: every article carries a usable link',
+                all(a.url.startswith('http') for a in _arts))
+        t.check('LIVE: no article is older than the staleness limit',
+                all(a.age_days is None or a.age_days <= 45 for a in _arts))
+else:
+    t.check('LIVE news check SKIPPED - no SERP_API_KEY/GOOGLE_API_KEY in env', True)
 
 sys.exit(t.summary())

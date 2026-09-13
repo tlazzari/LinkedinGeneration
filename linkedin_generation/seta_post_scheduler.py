@@ -447,6 +447,18 @@ def run_single_generation(
 
     if post.news_articles:
         extra_metadata["news_sources"] = ", ".join(a.source for a in post.news_articles)
+    elif pillar.use_news_search and post_type != "holiday":
+        # LOUD, and greppable. Between 2026-08-20 and 2026-09-13 every news pillar
+        # ran with zero articles and published anyway: the post still went out, the
+        # cron sentinel was still touched and the health check still passed, so
+        # three weeks of generic posts looked exactly like success from outside.
+        # The suite now fails if this token appears in a recent log.
+        extra_metadata["news_outage"] = "true"
+        logging.error(
+            "NEWS_OUTAGE: pillar '%s' requires news but every provider returned "
+            "nothing - this post is generic filler, check SERP_API_KEY and "
+            "GOOGLE_API_KEY", pillar.name,
+        )
 
     if publisher:
         if video_path:
@@ -484,6 +496,16 @@ def run_single_generation(
             extra_metadata["linkedin_share_urn"] = publish_result["share_urn"]
             logging.info(f"Published to LinkedIn: {publish_result['share_urn']}")
 
+            # The source link goes in the FIRST COMMENT, never the body: LinkedIn
+            # demotes posts carrying an outbound link. Best effort only - the post
+            # is already live, so a failure here is logged and swallowed.
+            comment = build_source_comment(post.news_articles)
+            if comment:
+                result = publisher.comment_on_post(
+                    share_urn=publish_result["share_urn"], text=comment,
+                )
+                extra_metadata["source_comment"] = "posted" if result else "failed"
+
     # Save artifacts
     used_image = image_payload or ImagePayload(prompt="", provider="none", alt_text=post.alt_text)
     if video_path:
@@ -512,6 +534,28 @@ def run_single_generation(
             print(f"  - {article.title}")
             print(f"    {article.url}")
     print()
+
+
+def build_source_comment(articles) -> str:
+    """The first comment: real, clickable links to what the post is built on.
+
+    One primary source (the one the post is anchored on) plus at most one
+    secondary, so the comment stays readable. Chinese-language sources are
+    flagged, because for a European reader that is part of the information.
+    """
+    if not articles:
+        return ""
+    lines = ["Sources:"]
+    for article in articles[:2]:
+        if not article.url:
+            continue
+        when = f", {article.published_date}" if article.published_date else ""
+        lang = " [in Chinese]" if getattr(article, "language", "en") == "zh" else ""
+        lines.append(f"{article.title}")
+        lines.append(f"{article.source}{when}{lang}")
+        lines.append(article.url)
+        lines.append("")
+    return "\n".join(lines).strip() if len(lines) > 1 else ""
 
 
 def build_scheduled_job(

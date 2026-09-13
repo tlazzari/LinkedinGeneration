@@ -156,8 +156,15 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
     def _strip_urls(
         payload: Dict[str, Any], news_articles: List[NewsArticle], post_type: str
     ) -> Dict[str, Any]:
-        """Remove hallucinated URLs when no real news sources were provided."""
-        if news_articles or post_type == "holiday":
+        """Strip URLs from the post body.
+
+        Until 2026-09-13 this ran only when NO news had been fetched, because the
+        prompt asked for a link in the body whenever news existed. The link now
+        goes in the first comment (LinkedIn demotes posts with outbound links),
+        so any URL in the body is either a leftover instruction being obeyed or a
+        hallucination — both unwanted. Holiday posts are left alone.
+        """
+        if post_type == "holiday":
             return payload
         import re
 
@@ -198,10 +205,13 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                 "- The Seta Capital connection belongs ONLY in the final paragraph (cta field)."
             )
         elif post_type == "technical":
-            if news_context and pillar.use_news_search:
-                url_directive = "- Include the FULL URL from the provided news sources (see below).\n"
-            else:
-                url_directive = "- Do NOT include any external links or URLs in the post body — Seta Capital's expertise should speak for itself.\n"
+            # The source link is published as the FIRST COMMENT, never in the
+            # body: LinkedIn suppresses reach on posts carrying an outbound link.
+            # The body still has to name the outlet and the date (2026-09-13).
+            url_directive = (
+                "- Do NOT paste any URL in the post body. Name the outlet and when it "
+                "reported instead; the link is published separately as the first comment.\n"
+            )
             post_directives = (
                 "- BODY: provide substantive analysis with specific data points. Do NOT mention "
                 "Seta Capital in the body — let the analysis itself demonstrate the expertise.\n"
@@ -227,11 +237,23 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                 f"{news_context}\n"
                 "\n"
                 "You MUST:\n"
-                "1. Reference at least ONE specific news item from above in your post\n"
-                "2. Include the FULL URL (e.g., https://www.bloomberg.com/...) in the post body\n"
-                "3. Provide expert commentary on the news implications (in the body, WITHOUT naming Seta Capital — the firm is introduced only in the final paragraph)\n"
-                "4. Make the post feel timely and connected to current events\n"
-                "5. Format the link naturally in the text (e.g., 'Read more: [URL]' or 'Source: [URL]')\n"
+                "1. OPEN on ONE specific development from above — the actual companies, "
+                "sector and event. A post that opens on a theme ('cross-border M&A is "
+                "accelerating') instead of an event is a failed post.\n"
+                "2. Attribute it in the body by OUTLET NAME and DATE, exactly as given "
+                "above (e.g. 'Nikkei Chinese reported on 9 September'). Never write "
+                "'recent reports', 'industry data' or any unnamed source.\n"
+                "3. Carry over at least one CONCRETE figure from the reporting — a "
+                "percentage, a deal value, a count, a date. Invent nothing: if a number "
+                "is not in the material above, it does not go in the post.\n"
+                "4. Spend the SECOND HALF of the body on what the reporting does not "
+                "say — the operator's read on what it means for a European owner or a "
+                "Chinese buyer over the next 12 months. This is the part that is worth "
+                "reading; the news alone is not.\n"
+                "5. Where the source is Chinese-language, say so — that it was reported "
+                "in the Chinese press is itself informative for a European audience.\n"
+                "6. Do NOT paste any URL. The link is published as the first comment.\n"
+                "7. No Seta Capital in the body — the firm appears only in the cta.\n"
             )
         else:
             news_requirements = ""

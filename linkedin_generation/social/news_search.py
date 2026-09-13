@@ -61,6 +61,77 @@ def get_pillar_search_queries():
 
 PILLAR_SEARCH_QUERIES = get_pillar_search_queries()
 
+
+def get_pillar_search_queries_zh():
+    """Chinese-language queries, tried FIRST for every pillar (2026-09-13).
+
+    Chinese outlets carry the Europe-China deal flow that matters to Seta's
+    audience days before the Western wires do, and often cover deals the wires
+    never pick up at all. A live check on 2026-09-13 returned, in one query:
+    the EU state-subsidy review of JD.com/Ceconomy (RFI, DW, 2 days old), Nikkei
+    CN on Chinese firms holding 4% of Europe's auto production capacity by 2030,
+    and 中金在线 counting 130+ European component makers acquired in 20 years.
+    The equivalent English query returned generic advisory marketing.
+    """
+    return {
+        "Cross-Border M&A Insights": [
+            "中国 企业 收购 欧洲",
+            "中企 跨境并购 欧洲",
+            "中国 资本 收购 德国 意大利 企业",
+        ],
+        "M&A Insights": [
+            "中国 企业 收购 欧洲",
+            "中企 出海 并购 交易",
+            "欧盟 审查 中国 收购",
+        ],
+        "Thought Leadership": [
+            "中企 出海 欧洲 战略",
+            "欧盟 外资审查 中国 投资",
+            "家族企业 传承 出售 欧洲",
+        ],
+        "Industry Expertise": [
+            "跨境并购 欧洲 制造业",
+            "中国 汽车零部件 收购 欧洲",
+            "工业自动化 并购 中国 欧洲",
+        ],
+        "Technology Sector Trends": [
+            "中国 科技企业 欧洲 投资",
+            "新能源 电池 欧洲 建厂 收购",
+        ],
+        "Market Intelligence": [
+            "中欧 贸易 投资 数据",
+            "中国 对欧洲 直接投资 报告",
+        ],
+    }
+
+
+PILLAR_SEARCH_QUERIES_ZH = get_pillar_search_queries_zh()
+
+# Articles older than this are dropped: a post that opens on a 4-month-old deal
+# reads exactly like the generic filler this pipeline is meant to replace.
+MAX_ARTICLE_AGE_DAYS = int(os.getenv("NEWS_MAX_AGE_DAYS", "45"))
+
+# Chinese outlets rank ABOVE the Western wires (2026-09-13, user's call: "news
+# from chinese websites would be more interesting"). Seta's LinkedIn audience is
+# half Chinese buy-side; citing 新华财经 or 日经中文网 on a Europe deal is both more
+# differentiated and closer to where these processes actually start.
+PREFERRED_SOURCES_ZH = [
+    "cnfin.com",       # 新华财经 (Xinhua Finance)
+    "caixin.com",      # 财新
+    "yicai.com",       # 第一财经
+    "nbd.com.cn",      # 每日经济新闻
+    "21jingji.com",    # 21世纪经济报道
+    "cn.nikkei.com",   # 日经中文网
+    "stcn.com",        # 证券时报
+    "cls.cn",          # 财联社
+    "jiemian.com",     # 界面新闻
+    "chnfund.com",     # 中国基金报
+    "cnfol.com",       # 中金在线
+    "sina.com.cn",     # 新浪财经
+    "dw.com",          # DW 中文
+    "rfi.fr",          # RFI 中文
+]
+
 # Preferred news sources (not restricted, just prioritized)
 PREFERRED_SOURCES = [
     "bloomberg.com",
@@ -86,11 +157,132 @@ class NewsArticle:
     summary: str
     published_date: Optional[str] = None
     preview_image_url: Optional[str] = None
+    language: str = "en"
+    age_days: Optional[int] = None
 
     def to_context_string(self) -> str:
-        """Format article for LLM context."""
-        date_str = f" ({self.published_date})" if self.published_date else ""
-        return f"- {self.title}{date_str}\n  Source: {self.source}\n  URL: {self.url}\n  Summary: {self.summary}"
+        """Format article for LLM context.
+
+        The URL is deliberately NOT given to the model. It goes in the first
+        comment after publishing instead (LinkedIn demotes posts carrying an
+        outbound link in the body), and a model handed a URL pastes it.
+        """
+        date_str = f", {self.published_date}" if self.published_date else ""
+        lang = " [Chinese-language source]" if self.language == "zh" else ""
+        return (
+            f"- HEADLINE: {self.title}\n"
+            f"  OUTLET: {self.source}{date_str}{lang}\n"
+            f"  REPORTED: {self.summary}"
+        )
+
+
+_REL_DATE_RE = re.compile(
+    r"(\d+)\s*(分钟|小时|天|周|个月|月|年|minute|hour|day|week|month|year)",
+    re.IGNORECASE,
+)
+_REL_UNIT_DAYS = {
+    "分钟": 0, "minute": 0, "小时": 0, "hour": 0,
+    "天": 1, "day": 1, "周": 7, "week": 7,
+    "个月": 30, "月": 30, "month": 30, "年": 365, "year": 365,
+}
+
+
+def parse_relative_age(text: str) -> Optional[int]:
+    """Turn '4 天前' / '3 weeks ago' / '2026-09-09' into an age in days.
+
+    SerpAPI returns news dates in the locale of the query, so a Chinese search
+    comes back as '3 周前'. Without this every article looked undated and the
+    recency filter could not run, which is how 4-month-old pieces were reaching
+    the prompt alongside today's.
+    """
+    if not text:
+        return None
+    m = _REL_DATE_RE.search(text)
+    if m:
+        n = int(m.group(1))
+        unit = m.group(2).lower()
+        return n * _REL_UNIT_DAYS.get(unit, 1)
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d %b %Y", "%b %d, %Y"):
+        try:
+            return max(0, (datetime.now() - datetime.strptime(text.strip()[:11].strip(), fmt)).days)
+        except ValueError:
+            continue
+    return None
+
+
+def resolve_publisher_url(url: str, timeout: int = 15) -> str:
+    """Follow a Google grounding redirect to the real publisher URL.
+
+    Grounded Gemini ALWAYS returns vertexaisearch.cloud.google.com redirect
+    links, never the publisher's own. The old code recognised this and threw
+    those articles away, which meant Gemini could never contribute a single
+    usable result. They resolve fine — verified 2026-09-13 against mining.com,
+    theguardian.com and brusselssignal.eu — so follow them instead.
+    """
+    if "vertexaisearch" not in url and "google.com/grounding" not in url:
+        return url
+    try:
+        r = requests.get(url, timeout=timeout, allow_redirects=True,
+                         headers={"User-Agent": "Mozilla/5.0 (compatible; SetaCapitalBot/1.0)"})
+        return r.url or url
+    except Exception as e:
+        logger.debug(f"Could not resolve grounding redirect: {e}")
+        return ""
+
+
+def search_news_serpapi(
+    query: str, num_results: int = 8, lang: str = "zh", max_age: str = "qdr:m"
+) -> List[dict]:
+    """Google News via SerpAPI — the primary provider since 2026-09-13.
+
+    Uses engine=google&tbm=nws (NOT engine=google_news) because only that form
+    accepts `tbs=qdr:*`, and without a date restriction the results are mostly
+    months old. `SERP_API_KEY` has been in /opt/linkedin/.env all along; the code
+    was looking for `SERPER_API_KEY` (a different product) and so never used it.
+    """
+    api_key = os.getenv("SERP_API_KEY")
+    if not api_key:
+        logger.warning("SERP_API_KEY not set, skipping SerpAPI search")
+        return []
+    base = os.getenv("SERP_API_BASE", "https://serpapi.com").rstrip("/")
+    hl, gl = ("zh-cn", "cn") if lang == "zh" else ("en", "us")
+    try:
+        response = requests.get(
+            f"{base}/search",
+            params={"engine": "google", "tbm": "nws", "q": query, "tbs": max_age,
+                    "hl": hl, "gl": gl, "num": num_results, "api_key": api_key},
+            timeout=45,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("error"):
+            logger.warning(f"SerpAPI returned an error for '{query}': {data['error']}")
+            return []
+        out = []
+        for n in data.get("news_results", []):
+            link = n.get("link", "")
+            if not link:
+                continue
+            raw_date = n.get("date", "") or ""
+            out.append({
+                "title": n.get("title", ""),
+                "url": link,
+                "snippet": n.get("snippet", "") or n.get("title", ""),
+                "image": n.get("thumbnail", ""),
+                "date": raw_date,
+                "age_days": parse_relative_age(raw_date),
+                "language": lang,
+                # SerpAPI names the publisher in the locale of the query, which
+                # is a better label than a domain guess when the domain is not
+                # one we curate.
+                "serp_source": (n.get("source") if isinstance(n.get("source"), str)
+                                else (n.get("source") or {}).get("name", "")),
+            })
+        logger.info(f"SerpAPI[{lang}] found {len(out)} articles for: {query}")
+        return out
+    except Exception as e:
+        logger.warning(f"SerpAPI news search failed for '{query}': {e}")
+        return []
 
 
 def search_news_serper(query: str, num_results: int = 5) -> List[dict]:
@@ -212,7 +404,15 @@ Return ONLY valid JSON array, no other text."""
             "tools": [{"google_search": {}}],
             "generationConfig": {
                 "temperature": 0.1,
-                "maxOutputTokens": 2000,
+                # 2000 was the whole budget INCLUDING gemini-2.5-flash's internal
+                # thinking tokens, which consumed all of it: every response came
+                # back finishReason=MAX_TOKENS, truncated mid-URL at ~190 chars,
+                # and the JSON parse failed. That is why news search returned zero
+                # articles on every run from 2026-08-20 to 2026-09-13 while the
+                # cron, the sentinel and the health check all stayed green.
+                # thinkingBudget=0 restores finishReason=STOP.
+                "maxOutputTokens": 8192,
+                "thinkingConfig": {"thinkingBudget": 0},
             }
         }
 
@@ -220,11 +420,19 @@ Return ONLY valid JSON array, no other text."""
         response.raise_for_status()
         data = response.json()
 
-        # Extract the text response
+        # Extract the text response. Grounded replies are split across several
+        # parts; reading only parts[0] silently truncated the JSON.
         try:
-            text = data["candidates"][0]["content"]["parts"][0]["text"]
+            candidate = data["candidates"][0]
+            parts = candidate.get("content", {}).get("parts", [])
+            text = "".join(p.get("text", "") for p in parts)
         except (KeyError, IndexError):
             logger.warning("Unexpected Gemini response structure")
+            return []
+        if candidate.get("finishReason") == "MAX_TOKENS":
+            logger.warning("Gemini search hit MAX_TOKENS - result will be incomplete")
+        if not text.strip():
+            logger.warning("Gemini search returned no text")
             return []
 
         # Parse JSON from response
@@ -247,16 +455,22 @@ Return ONLY valid JSON array, no other text."""
         for article in articles[:num_results]:
             if isinstance(article, dict) and article.get("url"):
                 url = article.get("url", "")
-                # Skip Google redirect URLs - they expire and don't work
+                # Grounded Gemini only ever emits vertexaisearch redirect links.
+                # Resolve them to the publisher instead of discarding the article.
                 if "vertexaisearch" in url or "google.com/grounding" in url:
-                    logger.warning(f"Skipping Google redirect URL: {url[:50]}...")
-                    continue
+                    url = resolve_publisher_url(url)
+                    if not url:
+                        logger.warning("Could not resolve a grounding redirect - dropping")
+                        continue
+                raw_date = article.get("date", "")
                 results.append({
                     "title": article.get("title", ""),
                     "url": url,
                     "snippet": article.get("snippet", ""),
-                    "date": article.get("date", ""),
+                    "date": raw_date,
+                    "age_days": parse_relative_age(raw_date),
                     "source": article.get("source", ""),
+                    "language": "en",
                 })
 
         logger.info(f"Gemini search found {len(results)} valid articles for: {query}")
@@ -325,10 +539,65 @@ def extract_source_name(url: str) -> str:
             "theguardian.com": "The Guardian",
             "bbc.com": "BBC",
             "cnn.com": "CNN",
+            # Chinese outlets: name them as a Chinese reader would recognise
+            # them, with the English gloss, since the post itself is in English.
+            "cnfin.com": "Xinhua Finance (新华财经)",
+            "caixin.com": "Caixin (财新)",
+            "yicai.com": "Yicai (第一财经)",
+            "nbd.com.cn": "National Business Daily (每日经济新闻)",
+            "21jingji.com": "21st Century Business Herald (21世纪经济报道)",
+            "cn.nikkei.com": "Nikkei Chinese (日经中文网)",
+            "stcn.com": "Securities Times (证券时报)",
+            "cls.cn": "Cailianshe (财联社)",
+            "jiemian.com": "Jiemian (界面新闻)",
+            "chnfund.com": "China Fund News (中国基金报)",
+            "cnfol.com": "CnFol (中金在线)",
+            "sina.com.cn": "Sina Finance (新浪财经)",
+            "dw.com": "Deutsche Welle",
+            "rfi.fr": "RFI",
         }
-        return source_names.get(domain, domain.split(".")[0].title())
+        if domain in source_names:
+            return source_names[domain]
+        # Match on the registrable suffix: the live feed returns auto.cnfol.com
+        # and finance.sina.com.cn, which an exact lookup missed entirely and
+        # labelled "Auto" and "Finance" in the post.
+        for known, label in source_names.items():
+            if domain.endswith("." + known):
+                return label
+        parts = [x for x in domain.split(".") if x not in ("www", "m", "cn", "com", "net", "org")]
+        return parts[0].title() if parts else "News Source"
     except Exception:
         return "News Source"
+
+
+def _best_source_label(url: str, result: dict) -> str:
+    """Curated bilingual name first, then the publisher name the feed gave us."""
+    label = extract_source_name(url)
+    fallback = (result.get("serp_source") or result.get("source") or "").strip()
+    # extract_source_name returns a Title-cased domain stem when it knows nothing;
+    # in that case the feed's own label is better ("每日经济新闻" beats "Nbd").
+    if fallback and "(" not in label and label.lower() == label.split()[0].lower():
+        known = any(ch in label for ch in "（(") or label in (
+            "Bloomberg", "Reuters", "Financial Times", "Wall Street Journal",
+            "South China Morning Post", "Caixin", "The Economist", "CNBC",
+            "TechCrunch", "New York Times", "The Guardian", "BBC", "CNN",
+            "Deutsche Welle", "RFI",
+        )
+        if not known:
+            return fallback
+    return label
+
+
+def _rank_key(result: dict):
+    """Chinese preferred outlets first, then Western preferred, then freshness."""
+    url = (result.get("url") or "").lower()
+    for i, src in enumerate(PREFERRED_SOURCES_ZH):
+        if src in url:
+            return (0, i, result.get("age_days") if result.get("age_days") is not None else 999)
+    for i, src in enumerate(PREFERRED_SOURCES):
+        if src in url:
+            return (1, i, result.get("age_days") if result.get("age_days") is not None else 999)
+    return (2, 0, result.get("age_days") if result.get("age_days") is not None else 999)
 
 
 def search_news_for_pillar(
@@ -336,141 +605,162 @@ def search_news_for_pillar(
     num_articles: int = 3,
     fetch_images: bool = True,
 ) -> List[NewsArticle]:
-    """
-    Search for recent news articles relevant to a content pillar.
+    """Find recent, specific news for a content pillar.
 
-    Args:
-        pillar_name: Name of the content pillar
-        num_articles: Number of articles to return
-        fetch_images: Whether to fetch preview images from articles
-
-    Returns:
-        List of NewsArticle objects
+    Order of providers (rewritten 2026-09-13):
+      1. SerpAPI Google News in CHINESE, restricted to the last month
+      2. SerpAPI Google News in English, same restriction
+      3. Gemini with Google Search grounding (redirects resolved)
+    The legacy Tavily / Serper / Google-Custom-Search providers stay as further
+    fallbacks but none of their keys are configured; before this rewrite they
+    were the ONLY fallbacks behind a Gemini call that always failed, so the
+    whole chain returned nothing for three weeks.
     """
-    queries = PILLAR_SEARCH_QUERIES.get(pillar_name, [])
-    if not queries:
+    zh_queries = PILLAR_SEARCH_QUERIES_ZH.get(pillar_name, [])
+    en_queries = PILLAR_SEARCH_QUERIES.get(pillar_name, [])
+    if not zh_queries and not en_queries:
         logger.warning(f"No search queries defined for pillar: {pillar_name}")
         return []
 
-    all_results = []
+    all_results: List[dict] = []
     seen_urls = set()
+    seen_titles = set()
 
-    # Try each search provider in order of preference
-    for query in queries[:2]:  # Use first 2 queries to get variety
-        # Try Gemini with Google Search first (uses existing GOOGLE_API_KEY)
-        results = search_news_gemini(query, num_results=5)
-        if results:
-            for r in results:
-                url = r.get("url", "")
-                if url and url not in seen_urls:
-                    seen_urls.add(url)
-                    all_results.append({
-                        "title": r.get("title", ""),
-                        "url": url,
-                        "snippet": r.get("snippet", ""),
-                        "image": "",
-                        "date": r.get("date", ""),
-                    })
-            continue
-
-        # Fallback to Tavily
-        results = search_news_tavily(query, num_results=5)
-        if results:
-            for r in results:
-                url = r.get("url", "")
-                if url and url not in seen_urls:
-                    seen_urls.add(url)
-                    all_results.append({
-                        "title": r.get("title", ""),
-                        "url": url,
-                        "snippet": r.get("content", r.get("snippet", "")),
-                        "image": r.get("image", ""),
-                        "date": r.get("published_date", ""),
-                    })
-            continue
-
-        # Fallback to Serper
-        results = search_news_serper(query, num_results=5)
-        if results:
-            for r in results:
-                url = r.get("link", "")
-                if url and url not in seen_urls:
-                    seen_urls.add(url)
-                    all_results.append({
-                        "title": r.get("title", ""),
-                        "url": url,
-                        "snippet": r.get("snippet", ""),
-                        "image": r.get("imageUrl", ""),
-                        "date": r.get("date", ""),
-                    })
-            continue
-
-        # Fallback to Google Custom Search
-        results = search_news_google_custom(query, num_results=5)
+    def absorb(results: List[dict]) -> None:
         for r in results:
-            url = r.get("link", "")
-            if url and url not in seen_urls:
-                seen_urls.add(url)
-                all_results.append({
-                    "title": r.get("title", ""),
-                    "url": url,
-                    "snippet": r.get("snippet", ""),
-                    "image": r.get("pagemap", {}).get("cse_image", [{}])[0].get("src", ""),
-                    "date": "",
-                })
+            url = r.get("url", "")
+            title = (r.get("title") or "").strip().lower()
+            if not url or url in seen_urls or (title and title in seen_titles):
+                continue
+            age = r.get("age_days")
+            if age is not None and age > MAX_ARTICLE_AGE_DAYS:
+                continue
+            seen_urls.add(url)
+            if title:
+                seen_titles.add(title)
+            all_results.append(r)
 
-    # Sort by preferred sources
-    def source_priority(result):
-        url = result.get("url", "").lower()
-        for i, source in enumerate(PREFERRED_SOURCES):
-            if source in url:
-                return i
-        return len(PREFERRED_SOURCES)
+    # 1. Chinese first — this is where the Europe-China deal flow actually breaks.
+    for query in zh_queries[:2]:
+        absorb(search_news_serpapi(query, num_results=8, lang="zh"))
+        if len(all_results) >= num_articles * 2:
+            break
 
-    all_results.sort(key=source_priority)
+    # 2. English, to widen the pool (and to carry the pillar if Chinese was thin).
+    if len(all_results) < num_articles:
+        for query in en_queries[:2]:
+            absorb(search_news_serpapi(query, num_results=8, lang="en"))
+            if len(all_results) >= num_articles:
+                break
 
-    # Convert to NewsArticle objects
-    articles = []
+    # 3. Grounded Gemini as the last resort.
+    if not all_results:
+        for query in (en_queries or zh_queries)[:1]:
+            absorb(search_news_gemini(query, num_results=5))
+
+    all_results.sort(key=_rank_key)
+
+    articles: List[NewsArticle] = []
     for r in all_results[:num_articles]:
         url = r.get("url", "")
         preview_image = r.get("image", "")
-
-        # Try to fetch preview image if not available and requested
         if fetch_images and not preview_image:
             preview_image = fetch_article_preview_image(url)
-
+        age = r.get("age_days")
+        published = r.get("date", "") or ""
+        if age is not None:
+            # Give the model an absolute date; "3 周前" means nothing in a post.
+            published = (datetime.now() - timedelta(days=age)).strftime("%-d %B %Y")
         articles.append(NewsArticle(
             title=r.get("title", "Untitled"),
             url=url,
-            source=extract_source_name(url),
-            summary=r.get("snippet", "")[:300],  # Limit summary length
-            published_date=r.get("date", ""),
+            source=_best_source_label(url, r),
+            summary=(r.get("snippet", "") or "")[:400],
+            published_date=published,
             preview_image_url=preview_image,
+            language=r.get("language", "en"),
+            age_days=age,
         ))
 
-    logger.info(f"Found {len(articles)} news articles for pillar '{pillar_name}'")
+    logger.info(
+        "Found %d news articles for pillar '%s' (%d Chinese-language)",
+        len(articles), pillar_name, sum(1 for a in articles if a.language == "zh"),
+    )
     return articles
 
 
+def provider_health(timeout_query: str = "中国 企业 收购 欧洲") -> dict:
+    """Live check that the news providers actually return articles.
+
+    Exists because nothing ever verified this: the only test was that
+    news_search.py was present on disk, so a total provider outage ran for three
+    weeks (2026-08-20 → 2026-09-13) while every post published on schedule with
+    no news in it at all. Called by the LinkedIn test suite.
+    """
+    health = {}
+    try:
+        health["serpapi_zh"] = len(search_news_serpapi(timeout_query, 5, lang="zh"))
+    except Exception as e:
+        health["serpapi_zh"] = f"ERROR: {e}"
+    try:
+        health["serpapi_en"] = len(
+            search_news_serpapi("Chinese acquisition European manufacturer", 5, lang="en")
+        )
+    except Exception as e:
+        health["serpapi_en"] = f"ERROR: {e}"
+    try:
+        health["gemini"] = len(search_news_gemini("China Europe M&A acquisition", 3))
+    except Exception as e:
+        health["gemini"] = f"ERROR: {e}"
+    return health
+
+
 def build_news_context(articles: List[NewsArticle]) -> str:
-    """Build a context string from news articles for LLM prompt."""
+    """Build the news block for the LLM prompt.
+
+    Deliberately gives the model NO URLs. The link is published as the first
+    comment instead (LinkedIn suppresses reach on posts with an outbound link in
+    the body), and a model handed a URL will paste it into the body every time.
+    """
     if not articles:
         return ""
 
-    lines = ["Recent relevant news to reference in your post:"]
+    lines = [
+        "REAL NEWS FETCHED TODAY — the post MUST be built on this, not on general themes:",
+        "",
+    ]
     for article in articles:
         lines.append(article.to_context_string())
-    lines.append("")
-    lines.append("IMPORTANT: Include at least one full URL from the above articles in your post.")
-    lines.append("Use the actual news to make your post timely and relevant.")
-
+    lines += [
+        "",
+        "HOW TO USE IT (non-negotiable):",
+        "1. Anchor the post on ONE specific development above — name the companies,",
+        "   the sector and what actually happened. Not a theme, an event.",
+        "2. Attribute it in the body: the outlet by name and when it was reported",
+        "   (e.g. 'Nikkei Chinese reported on 9 September'). Never 'recent reports'.",
+        "3. Carry over at least one CONCRETE figure from the reporting above —",
+        "   a percentage, a deal value, a count, a date. Invent nothing.",
+        "4. Then add what the reporting does NOT say: the operator's read on what",
+        "   this means for a European owner or a Chinese buyer in the next 12 months.",
+        "   That second half is the whole value of the post.",
+        "5. Do NOT paste any URL. The link is published separately as the first",
+        "   comment; a URL in the body suppresses the post's reach.",
+    ]
     return "\n".join(lines)
 
 
 __all__ = [
     "NewsArticle",
     "search_news_for_pillar",
+    "search_news_serpapi",
+    "search_news_gemini",
+    "resolve_publisher_url",
+    "parse_relative_age",
+    "provider_health",
     "build_news_context",
     "fetch_article_preview_image",
     "PILLAR_SEARCH_QUERIES",
+    "PILLAR_SEARCH_QUERIES_ZH",
+    "PREFERRED_SOURCES_ZH",
+    "MAX_ARTICLE_AGE_DAYS",
 ]
