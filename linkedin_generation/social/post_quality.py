@@ -115,6 +115,17 @@ IDIOMS = {
     "run the numbers": "do the maths", "moving parts": "separate pieces",
 }
 
+# Set phrases that CONTAIN a flagged word but are the correct technical term.
+# Found live 2026-09-13: a Market Intelligence post was told to replace
+# "leverage" with "use" inside "leveraged buyouts", which is the name of the
+# instrument. Flagging real terminology trains the model to write vaguer copy,
+# which is the opposite of the goal.
+PROTECTED_PHRASES = [
+    "leveraged buyout", "leveraged finance", "leveraged loan",
+    "leveraged recapitalisation", "leveraged recapitalization",
+    "mitigating circumstances", "granular data",
+]
+
 # A sentence with more than one idea in it is where non-native comprehension
 # actually breaks, well before vocabulary does.
 MAX_AVG_SENTENCE_WORDS = 22
@@ -143,6 +154,10 @@ def _inflections(term: str) -> str:
 def hard_word_hits(text: str) -> Dict[str, str]:
     """Complex words present, mapped to the simpler word to use instead."""
     lowered = text.lower()
+    # Blank out the protected phrases first so a flagged word sitting inside a
+    # real technical term cannot match.
+    for phrase in PROTECTED_PHRASES:
+        lowered = lowered.replace(phrase, " " * len(phrase))
     found: Dict[str, str] = {}
     for term, simpler in {**HARD_WORDS, **IDIOMS}.items():
         # Word-bounded so a match inside a longer unrelated word or a URL cannot

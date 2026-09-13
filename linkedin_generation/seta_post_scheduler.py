@@ -31,6 +31,11 @@ from linkedin_generation.social.image_providers import (
     create_image_provider,
 )
 from linkedin_generation.social.news_search import fetch_article_preview_image
+from linkedin_generation.social.post_delivery import (
+    delivery_mode as resolve_delivery_mode,
+    delivery_recipients,
+    send_post_email,
+)
 from linkedin_generation.social.seta_chart_generator import generate_market_chart, CHART_TYPES
 from linkedin_generation.social.artifacts import slugify, save_artifacts
 from linkedin_generation.holiday.calendars import load_calendars
@@ -146,6 +151,21 @@ def parse_args() -> argparse.Namespace:
         "--publish",
         action="store_true",
         help="Publish generated posts directly to LinkedIn",
+    )
+    parser.add_argument(
+        "--deliver",
+        choices=["auto", "linkedin", "email"],
+        default=os.getenv("SOCIAL_DELIVERY", "auto"),
+        help="Where the finished post goes. 'email' sends it to the page owner to "
+             "publish by hand - for companies that cannot give us LinkedIn API "
+             "access. 'auto' uses the brand's own setting (default: linkedin).",
+    )
+    parser.add_argument(
+        "--deliver-to",
+        type=str,
+        default=os.getenv("SOCIAL_DELIVERY_EMAIL", ""),
+        help="Comma-separated recipients for --deliver email, overriding the "
+             "brand's configured notify_email.",
     )
     parser.add_argument(
         "--linkedin-owner",
@@ -340,6 +360,9 @@ def run_single_generation(
     generator: SetaLinkedInPostGenerator,
     output_dir: Path,
     publisher: Optional[LinkedInPublisher],
+    delivery: str = "auto",
+    deliver_to: Optional[List[str]] = None,
+    brand_key: str = "seta",
 ) -> None:
     """Run a single post generation."""
     logging.info("Running single Seta Capital post generation")
@@ -357,6 +380,20 @@ def run_single_generation(
     post_type = "technical"  # All Seta posts are analytical/technical
 
     logging.info(f"Selected pillar: {pillar.name} (news_search={pillar.use_news_search})")
+
+    # Resolved before any expensive work so a misconfigured email delivery fails
+    # loudly now rather than after a Veo render.
+    deliver_mode = delivery
+    if deliver_mode == "auto":
+        deliver_mode = resolve_delivery_mode(brand_key)
+    email_recipients = list(deliver_to) if deliver_to else delivery_recipients(brand_key)
+    if deliver_mode == "email" and not email_recipients:
+        logging.error(
+            "EMAIL_DELIVERY_FAILED: delivery is set to email but no recipient is "
+            "configured for '%s' - set notify_email on the Social page, or pass "
+            "--deliver-to", brand_key,
+        )
+        return None
 
     # Generate video (for Veo pillars) or image
     images_dir = output_dir / "images"
@@ -471,7 +508,36 @@ def run_single_generation(
             "GOOGLE_API_KEY", pillar.name,
         )
 
-    if publisher:
+    # EMAIL DELIVERY (2026-09-13). Not every company will hand over an
+    # organisation URN and a w_organization_social token - some cannot, because
+    # someone outside the company administers the page. Rather than leave those
+    # tenants without the feature, generate exactly as normal and send the
+    # finished post to them to paste in. The media is attached; the source links
+    # travel as the first comment, separately, for the same reason they are not
+    # in the body.
+    if deliver_mode == "email":
+        media_for_email = video_path
+        if media_for_email is None:
+            media_for_email = ensure_local_image_file(
+                image=image_payload, fallback_dir=images_dir, timestamp=scheduled_for,
+            )
+        sent = send_post_email(
+            display_name=campaign.company_name if hasattr(campaign, "company_name") else "Seta Capital",
+            recipients=email_recipients,
+            post_text=post.as_text,
+            headline=post.headline,
+            alt_text=post.alt_text,
+            first_comment=build_source_comment(post.news_articles),
+            media_path=media_for_email,
+        )
+        extra_metadata["delivery"] = "email:sent" if sent else "email:FAILED"
+        if not sent:
+            logging.error(
+                "EMAIL_DELIVERY_FAILED: the post was written but could not be sent "
+                "to %s - it is saved in the artefacts and nothing was published",
+                ", ".join(email_recipients) or "(nobody configured)",
+            )
+    elif publisher:
         if video_path:
             publish_result = publisher.publish_video_post(
                 text=post.as_text,
@@ -575,6 +641,8 @@ def build_scheduled_job(
     generator: SetaLinkedInPostGenerator,
     output_dir: Path,
     publisher: Optional[LinkedInPublisher],
+    delivery: str = "auto",
+    deliver_to: Optional[List[str]] = None,
 ) -> callable:
     """Build the scheduled job function."""
     def job():
@@ -583,6 +651,8 @@ def build_scheduled_job(
             generator=generator,
             output_dir=output_dir,
             publisher=publisher,
+            delivery=delivery,
+            deliver_to=deliver_to,
         )
     return job
 
@@ -617,6 +687,8 @@ def seta_daily_runner(
     output_dir: Path,
     publisher: Optional[LinkedInPublisher],
     holiday_config: Path,
+    delivery: str = "auto",
+    deliver_to: Optional[List[str]] = None,
 ) -> None:
     """Holiday-aware daily runner for Seta Capital.
 
@@ -659,6 +731,8 @@ def seta_daily_runner(
             holiday=decision.holiday,
             output_dir=output_dir,
             publisher=publisher,
+            delivery=delivery,
+            deliver_to=deliver_to,
         )
     else:
         # Regular Tue/Thu post
@@ -667,6 +741,8 @@ def seta_daily_runner(
             generator=generator,
             output_dir=output_dir,
             publisher=publisher,
+            delivery=delivery,
+            deliver_to=deliver_to,
         )
 
 
@@ -678,6 +754,8 @@ def _run_holiday_post(
     holiday,
     output_dir: Path,
     publisher: Optional[LinkedInPublisher],
+    delivery: str = "auto",
+    deliver_to: Optional[List[str]] = None,
 ) -> None:
     """Generate and publish a holiday-specific post."""
     tz = ZoneInfo(campaign.timezone)
@@ -797,6 +875,8 @@ def main() -> None:
             output_dir=output_dir,
             publisher=publisher,
             holiday_config=args.holiday_config,
+            delivery=args.deliver,
+            deliver_to=[e.strip() for e in args.deliver_to.split(",") if e.strip()],
         )
         return
 
@@ -806,6 +886,8 @@ def main() -> None:
             generator=generator,
             output_dir=output_dir,
             publisher=publisher,
+            delivery=args.deliver,
+            deliver_to=[e.strip() for e in args.deliver_to.split(",") if e.strip()],
         )
         return
 

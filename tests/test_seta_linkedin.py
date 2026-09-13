@@ -896,4 +896,88 @@ if os.getenv('SERP_API_KEY') or os.getenv('GOOGLE_API_KEY'):
 else:
     t.check('LIVE news check SKIPPED - no SERP_API_KEY/GOOGLE_API_KEY in env', True)
 
+# ============================================================================
+# EMAIL DELIVERY — for companies that cannot give us LinkedIn API access
+# ============================================================================
+# Publishing to a page needs an organisation URN and a w_organization_social
+# token, i.e. an admin of that page running an OAuth flow for us. Many Bolla
+# tenants will not or cannot do that. Email delivery generates exactly as normal
+# and sends the finished post for manual publishing (2026-09-13).
+from linkedin_generation.social.post_delivery import (
+    build_email, send_post_email, delivery_mode, delivery_recipients,
+    MAX_ATTACHMENT_BYTES, VERIFIED_SENDERS, DEFAULT_SENDER,
+)
+
+_subj, _html = build_email(
+    display_name='Acme Srl', post_text='Line one.\n\nLine two.',
+    headline='A headline', alt_text='Two engineers on a line',
+    first_comment='Sources:\nhttps://example.com/story', media_name='clip.mp4',
+)
+t.check('email: the subject names the company and the post', 'Acme Srl' in _subj and 'A headline' in _subj)
+t.check('email: the post text is included for copy-paste', 'Line one.' in _html and 'Line two.' in _html)
+t.check('email: the first comment is a SEPARATE block, not appended to the body',
+        'first comment' in _html.lower() and 'https://example.com/story' in _html)
+t.check('email: it explains why the link goes in the comment',
+        'fewer people' in _html or 'first comment' in _html.lower())
+t.check('email: the alt text is passed on for accessibility', 'Two engineers on a line' in _html)
+t.check('email: it states plainly that nothing was posted',
+        'Nothing has been posted to LinkedIn' in _html)
+
+_, _html_nolink = build_email(display_name='Acme', post_text='x', headline='h', alt_text='')
+t.check('email: no first-comment block when there are no sources',
+        'first comment' not in _html_nolink.lower())
+
+t.check('email: HTML in a post cannot break the email',
+        '&lt;script&gt;' in build_email(display_name='A', post_text='<script>x</script>',
+                                        headline='h', alt_text='')[1])
+
+t.check('email: sender must be a Brevo-verified address',
+        DEFAULT_SENDER in VERIFIED_SENDERS and len(VERIFIED_SENDERS) == 2)
+t.check('email: attachment cap leaves room for base64 inside Brevo 10MB limit',
+        0 < MAX_ATTACHMENT_BYTES < 7_500_000)
+
+t.check('email: no recipient is a failure, not a silent success',
+        send_post_email(display_name='A', recipients=[], post_text='x',
+                        headline='h', dry_run=True) is False)
+t.check('email: a dry run reports success without sending',
+        send_post_email(display_name='A', recipients=['x@y.com'], post_text='x',
+                        headline='h', dry_run=True) is True)
+
+t.check('delivery: brands default to publishing on LinkedIn', delivery_mode('seta') == 'linkedin')
+t.check('delivery: an unconfigured brand has no recipients', delivery_recipients('seta') == [])
+
+sched_src = (PKG_DIR / 'seta_post_scheduler.py').read_text()
+t.check('RULE: --deliver email is offered on the scheduler',
+        '"--deliver"' in sched_src and "'email'" in sched_src or '"email"' in sched_src)
+t.check('RULE: email delivery is resolved BEFORE the expensive media step',
+        sched_src.index('EMAIL_DELIVERY_FAILED') < sched_src.index('uses Veo'))
+t.check('RULE: email delivery replaces publishing, never runs alongside it',
+        'elif publisher:' in sched_src)
+t.check('RULE: a failed email is loud and greppable',
+        'EMAIL_DELIVERY_FAILED' in sched_src)
+t.check('RULE: holiday posts can be delivered by email too',
+        'def _run_holiday_post' in sched_src
+        and 'deliver_to' in sched_src.split('def _run_holiday_post')[1][:400])
+
+# The tenant-facing switch lives in the CRM page that writes the brand config.
+_social_lib = Path('/var/www/tntbearings.com/social-standalone/lib.php')
+if _social_lib.exists():
+    _lib = _social_lib.read_text()
+    _edit = Path('/var/www/tntbearings.com/social-standalone/edit.php').read_text()
+    t.check('RULE: the brand config carries a delivery choice',
+            "'delivery' => 'linkedin'" in _lib and "'notify_email' => ''" in _lib)
+    t.check('RULE: a tenant can choose email delivery in the CRM',
+            "name=\"delivery\"" in _edit and "name=\"notify_email\"" in _edit)
+    t.check('RULE: email delivery without an address is refused at save time',
+            'needs at least one address' in _edit)
+
+# --- plain English protects real terminology ---
+from linkedin_generation.social.post_quality import PROTECTED_PHRASES
+t.check('plain English: "leveraged buyout" is terminology, not jargon',
+        hard_word_hits('debt costs for leveraged buyouts') == {})
+t.check('plain English: "leverage" as a verb is still caught',
+        hard_word_hits('we leverage our network') == {'leverage': 'use'})
+t.check('plain English: protected phrases are declared, not hardcoded in the matcher',
+        'leveraged buyout' in PROTECTED_PHRASES)
+
 sys.exit(t.summary())
