@@ -211,4 +211,66 @@ t.check('RULE: a reshareable brand still may not',
 t.check('RULE: the limit is declared per voice, not hardcoded',
         TNT_VOICE.max_brand_mentions > SETA_VOICE.max_brand_mentions)
 
+# ============================================================================
+# NEVER ADVERTISE A COMPETITOR (2026-09-13)
+# ============================================================================
+# Building posts on real news made this urgent: bearing and toolholding trade
+# press is very often ABOUT a competitor - an SKF launch, a Schaeffler result, a
+# Haimer chuck - and a post opening on one is free advertising for them,
+# published from TNT's own page and paid for by TNT.
+#
+# The rule is NOT "never mention": a competitor's move is frequently the story,
+# and reporting it factually is legitimate. It is "never PROMOTE".
+from linkedin_generation.social.post_quality import competitor_promotion, TNT_COMPETITORS
+
+t.check('RULE: the competitor list is declared per brand, not hardcoded in the check',
+        TNT_VOICE.competitors and 'SKF' in TNT_VOICE.competitors)
+t.check('RULE: the list covers bearings AND toolholding',
+        all(n in TNT_COMPETITORS for n in ('SKF', 'Schaeffler', 'NSK', 'Timken',
+                                           'Haimer', 'Schunk', 'Kennametal')))
+t.check('RULE: Seta has no competitor list - it is not selling against anyone',
+        not SETA_VOICE.competitors)
+
+t.check('competitor: a name in the HEADLINE is promotion whatever the wording',
+        competitor_promotion('SKF launches new spindle bearing\nBody text.', TNT_COMPETITORS)
+        == ['SKF'])
+t.check('competitor: praise vocabulary in the same sentence is promotion',
+        competitor_promotion('Workholding matters\nThe leading Haimer chuck sets the standard.',
+                             TNT_COMPETITORS) == ['Haimer'])
+t.check('competitor: a plain factual report is NOT promotion - that is the news',
+        competitor_promotion('Spindle vibration costs uptime\nSchaeffler reported a 4% drop '
+                             'in orders last quarter. That matters for lead times.',
+                             TNT_COMPETITORS) == [])
+t.check('competitor: a post with no competitor in it is clean',
+        competitor_promotion('Pull studs and clamping force\nA worn pull stud loses force.',
+                             TNT_COMPETITORS) == [])
+t.check('competitor: a substring is not a false match',
+        competitor_promotion('Headline\nThe best skfitting we sell.', TNT_COMPETITORS) == [])
+t.check('RULE: the gate reports competitor promotion for the retry',
+        any('advert' in i for i in post_issues(
+            {'headline': 'SKF launches a new bearing', 'body': 'x', 'cta': 'And you?'},
+            TNT_VOICE)))
+t.check('RULE: the prompt tells the model outright not to advertise a competitor',
+        'NEVER ADVERTISE A COMPETITOR' in _cg)
+t.check('RULE: the prompt explains WHY (it is an advert TNT paid for)',
+        "an advert TNT paid for" in _cg)
+
+# ── Invented engineering figures get their own retry ────────────────────────
+# The prompt has said since day one that every number must come from the supplied
+# material. A dry run ignored it twice and produced "0.04 mm misalignment can cut
+# bearing operating life by 40%" and "improving alignment to 0.01 mm extends life
+# by 70%" - plausible, checkable and entirely invented. TNT's readers are
+# maintenance engineers who will check.
+t.check('RULE: invented figures trigger a focused retry, not just a warning',
+        'stat_issues' in _cg and 'focused retry' in _cg)
+t.check('RULE: the retry names the offending figures rather than re-asking blindly',
+        'Every one of those figures is invented' in _cg)
+t.check('RULE: it asks for a qualitative claim instead of a different invented number',
+        'an engineer cannot' in _cg)
+t.check('RULE: a post that still carries invented figures is loud and greppable',
+        'INVENTED_FIGURES' in _cg)
+# The phrase is wrapped across two source lines, so match the tail of it.
+t.check('RULE: the general "report, do not strip" rule is unchanged',
+        'not strip" (deleting every sentence with a number would gut the post)' in _cg)
+
 sys.exit(t.summary())

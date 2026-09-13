@@ -106,6 +106,46 @@ class LinkedInPostGenerator(BaseContentGenerator):
 
         payload = apply_fixes(payload, TNT_VOICE)
         remaining = post_issues(payload, TNT_VOICE, sources=sources, post_type=post_type)
+
+        # INVENTED ENGINEERING FIGURES GET THEIR OWN RETRY (2026-09-13).
+        # The prompt has told the model since day one that every number must come
+        # from the supplied material. It ignores that anyway: a dry run produced
+        # "0.04 mm misalignment can cut bearing operating life by 40%" and
+        # "improving alignment to 0.01 mm extends life by 70%" - plausible,
+        # checkable, and completely invented. TNT's readers are maintenance
+        # engineers who WILL check, so a fabricated tolerance costs more
+        # credibility than a vaguer sentence. The general rule stays "report, do
+        # not strip" (deleting every sentence with a number would gut the post);
+        # this is one focused re-ask naming the exact figures.
+        stat_issues = [i for i in remaining if i.startswith("statistics with no source")]
+        if stat_issues:
+            logger.warning("TNT post carries invented figures - re-asking: %s", stat_issues[0])
+            fix_raw = self.llm_client.complete(
+                self._build_prompt(
+                    pillar=pillar, post_type=post_type, image_mode=image_mode,
+                    holiday=holiday, news_context=news_context,
+                    quality_feedback=stat_issues + [
+                        "Every one of those figures is invented. Rewrite the post keeping the "
+                        "same argument but WITHOUT them: say 'shortens bearing life' rather "
+                        "than inventing a percentage, 'tighter alignment' rather than "
+                        "inventing a tolerance. A qualitative claim an engineer cannot "
+                        "falsify is worth more than a precise one they can."
+                    ],
+                ),
+                temperature=0.6,
+                max_tokens=650,
+            )
+            fix_payload = apply_fixes(self._strip_urls(self._parse_response(fix_raw)), TNT_VOICE)
+            fix_remaining = post_issues(fix_payload, TNT_VOICE, sources=sources, post_type=post_type)
+            if not [i for i in fix_remaining if i.startswith("statistics with no source")]:
+                payload, remaining = fix_payload, fix_remaining
+                logger.info("TNT post: invented figures removed on the focused retry")
+            else:
+                logger.error(
+                    "INVENTED_FIGURES: TNT post still carries unsourced numbers after a "
+                    "focused retry - %s", fix_remaining[0] if fix_remaining else "",
+                )
+
         if remaining:
             logger.warning(
                 "TNT post published with unresolved quality issues: %s",
@@ -337,6 +377,14 @@ class LinkedInPostGenerator(BaseContentGenerator):
                 "to the reader's machine. The news earns the attention; the product answers "
                 "it. A post that only summarises the news is a wasted post for TNT.\n"
                 "5. Do NOT paste any URL — the link is published as the first comment.\n"
+                "6. NEVER ADVERTISE A COMPETITOR. Much of this trade press is about "
+                + ", ".join(TNT_VOICE.competitors[:12]) + " and others like them. "
+                "If the story is about one of them, that is fine as a FACT — report what "
+                "happened and what it means for the reader's machine — but never put their "
+                "name in the headline, never repeat their product claims or marketing "
+                "language, and never call them leading, premium, innovative or best. The "
+                "post is published from TNT Motion's page; a post praising a competitor is "
+                "an advert TNT paid for.\n"
                 if news_context else ""
             )
             + "Output must be JSON with keys headline, body, cta, hashtags (list), image_prompt, video_prompt, alt_text.\n"

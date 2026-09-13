@@ -230,6 +230,14 @@ class BrandVoice:
     # for naming TNT twice (seen 2026-09-13 on a pull-stud post that was
     # otherwise exactly right).
     max_brand_mentions: int = 1
+    # Companies this brand must never advertise. Building posts on real news made
+    # this urgent (2026-09-13): bearing and toolholding news is very often ABOUT a
+    # competitor - a new SKF product, a Schaeffler result, a Haimer chuck - and a
+    # post that opens on one is free advertising for them, published from TNT's
+    # own page. The rule is not "never mention": a competitor's move is often the
+    # story. It is "never promote" - report the development, then say what it
+    # means for the reader, and never carry their marketing language.
+    competitors: Sequence[str] = ()
 
 
 # Worn-out headline vocabulary, measured over each brand's own archive.
@@ -246,6 +254,16 @@ SETA_VOICE = BrandVoice(
     ),
 )
 
+# Bearings, toolholding and workholding names that dominate this trade press.
+# A TNT post opening on one of these, in praising terms, is an advert for them.
+TNT_COMPETITORS = (
+    "SKF", "Schaeffler", "FAG", "INA", "NSK", "NTN", "Timken", "Koyo", "JTEKT",
+    "NACHI", "THK", "IKO", "RBC Bearings", "Rexnord", "Moog",
+    "Haimer", "Sandvik", "Kennametal", "Big Daishowa", "Rego-Fix", "Schunk",
+    "Hainbuch", "Lyndex", "Nikken", "Emuge", "Guhring", "Walter Tools",
+    "Seco Tools", "Iscar", "Mitsubishi Materials", "Kyocera",
+)
+
 TNT_VOICE = BrandVoice(
     name="TNT Motion",
     ban_promotional=False,
@@ -253,6 +271,7 @@ TNT_VOICE = BrandVoice(
     # and a direct CTA, so naming it in the body and again in the close is the
     # intended shape, not a defect.
     max_brand_mentions=3,
+    competitors=TNT_COMPETITORS,
     brand_in_closing_only=False,
     overused_headline_terms=(
         "myth",
@@ -364,6 +383,39 @@ def vague_source_hits(text: str) -> List[str]:
     return hits
 
 
+# Words that turn a mention into an endorsement.
+_PRAISE_RE = (
+    r"(?:leading|market[- ]leading|best|superior|premium|innovative|"
+    r"advanced|breakthrough|world[- ]class|top|trusted|renowned|excellen\w*|"
+    r"outstanding|unrivalled|unrivaled|sets the standard|gold standard)"
+)
+
+
+def competitor_promotion(text: str, competitors: Sequence[str]) -> List[str]:
+    """Competitors the post appears to be selling FOR, not merely reporting on.
+
+    A competitor named in the headline is treated as promotion whatever the
+    wording: the headline is what the feed shows, so "SKF launches X" published
+    from TNT's page reads as TNT amplifying SKF. Elsewhere it takes praise
+    vocabulary within the same sentence to count.
+    """
+    hits: List[str] = []
+    lines = text.split("\n", 1)
+    headline = lines[0] if lines else ""
+    for name in competitors:
+        pattern = r"(?<!\w)" + re.escape(name) + r"(?!\w)"
+        if re.search(pattern, headline, re.IGNORECASE):
+            hits.append(name)
+            continue
+        for sentence in re.split(r"(?<=[.!?])\s+", text):
+            if re.search(pattern, sentence, re.IGNORECASE) and re.search(
+                _PRAISE_RE, sentence, re.IGNORECASE
+            ):
+                hits.append(name)
+                break
+    return sorted(set(hits))
+
+
 def post_issues(
     payload: Dict[str, object],
     voice: BrandVoice,
@@ -424,6 +476,18 @@ def post_issues(
                 f"{voice.max_filler_per_100_words}) — replace "
                 + ", ".join(f"'{term}' x{count}" for term, count in worst)
                 + " with concrete nouns, names and specifics"
+            )
+
+    if voice.competitors and not is_holiday:
+        # Flagged for the retry, never stripped: deleting the sentence would gut
+        # a legitimate "what this means for you" piece. The model is told to keep
+        # the development and drop the endorsement.
+        promoted = competitor_promotion(whole, voice.competitors)
+        if promoted:
+            issues.append(
+                "reads as an advert for " + ", ".join(promoted)
+                + " - report what happened and what it means for the reader, never "
+                "their product claims or marketing language"
             )
 
     if voice.plain_english and not is_holiday:
