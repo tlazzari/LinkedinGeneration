@@ -13,7 +13,7 @@ import random
 
 from .manual_knowledge import build_lubrication_installation_context, build_case_study_context
 from .base_content import GeneratedPost, BaseContentGenerator
-from .post_quality import TNT_VOICE, apply_fixes, post_issues
+from .post_quality import PLAIN_ENGLISH_DIRECTIVE, TNT_VOICE, apply_fixes, post_issues
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +267,7 @@ class LinkedInPostGenerator(BaseContentGenerator):
             f"Proof points to weave in:\n{proof_points}\n\n"
             f"Tone guidance: {self.campaign.tone}.\n"
             f"Apply these directives:\n{post_directives}\n"
+            f"\n{PLAIN_ENGLISH_DIRECTIVE}\n"
             "Output must be JSON with keys headline, body, cta, hashtags (list), image_prompt, video_prompt, alt_text.\n"
             + (
                 f"\nCOMPANY-SPECIFIC MATERIAL (supplied by the account owner - treat as "

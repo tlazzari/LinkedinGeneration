@@ -11,7 +11,8 @@ from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 from .campaign_config import CampaignConfig, PostPillar
 from .news_search import NewsArticle, search_news_for_pillar, build_news_context
 from .base_content import GeneratedPost, BaseContentGenerator
-from .post_quality import SETA_VOICE, apply_fixes, post_issues
+from .media_prompts import compose_media_prompt
+from .post_quality import PLAIN_ENGLISH_DIRECTIVE, SETA_VOICE, apply_fixes, post_issues
 
 if TYPE_CHECKING:
     from linkedin_generation.holiday.calendars import HolidayEvent
@@ -113,17 +114,36 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
 
         all_hashtags = self._merge_hashtags(list(hashtags), pillar)
 
-        # YAML pillar.image_prompt is authoritative (human-reviewed, people-centric).
-        # LLM image_prompt is only used if the YAML has nothing set.
-        base_image_prompt = pillar.image_prompt or payload.get("image_prompt") or pillar.angle
-        if news_articles and pillar.use_news_search:
-            # Enhance image prompt with news context
-            news_summary = news_articles[0].title if news_articles else ""
-            image_prompt = f"{base_image_prompt} Inspired by this news: {news_summary}"
-        else:
-            image_prompt = base_image_prompt
-
-        video_prompt = payload.get("video_prompt") or f"Professional footage related to {pillar.angle.lower()}"
+        # MEDIA MUST MATCH THE POST (2026-09-13). This used to be
+        # `pillar.image_prompt or payload.get(...)`, i.e. the fixed YAML prompt
+        # always won, with the news headline bolted on as "Inspired by this
+        # news: <Chinese headline>". Every M&A post therefore showed the same
+        # Frankfurt boardroom handshake regardless of subject — a post about
+        # Chinese mining losses abroad and country environmental risk was
+        # illustrated with two people signing a term sheet.
+        #
+        # Now the model supplies the SUBJECT for this specific story, the YAML
+        # supplies the house look, and the mandate (real people at work, no
+        # skyline, no text, no logos) is appended in code by compose_media_prompt
+        # and cannot be dropped. A subject that trips the ban list is discarded
+        # and the vetted YAML prompt is used unchanged — which is the case the
+        # old "YAML always wins" rule was actually written for.
+        image_prompt = compose_media_prompt(
+            subject=payload.get("image_prompt"),
+            house_prompt=pillar.image_prompt,
+            kind="image",
+        )
+        # The model routinely returns image_prompt and forgets video_prompt even
+        # though both are in the output schema. Falling back to pillar.video_prompt
+        # there would put the generic boardroom back on screen, so reuse the image
+        # subject instead: same scene, in motion. Only if BOTH are missing or
+        # unsafe does the vetted YAML prompt take over.
+        video_subject = payload.get("video_prompt") or payload.get("image_prompt")
+        video_prompt = compose_media_prompt(
+            subject=video_subject,
+            house_prompt=pillar.video_prompt,
+            kind="video",
+        )
         alt_text = payload.get("alt_text") or f"Seta Capital insights on {pillar.name}"
 
         metadata: Dict[str, str] = {
@@ -283,13 +303,21 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         else:
             if news_context and pillar.use_news_search:
                 image_requirements = (
-                    "- Image_prompt MUST feature real human professionals relevant to the news topic.\n"
-                    "  If about tech/EV deals: show engineers or executives examining EV components.\n"
-                    "  If about manufacturing: show workers or managers on a modern factory floor.\n"
-                    "  If about market data: show a financial analyst reviewing charts at a desk.\n"
-                    "  If about deals/M&A: show professionals shaking hands in a meeting room.\n"
-                    "  NO empty buildings, NO city skylines without people.\n"
-                    "  NO text, NO logos, NO branding visible in the image."
+                    "- image_prompt and video_prompt MUST show the SUBJECT OF THIS POST, not\n"
+                    "  generic advisory imagery. Describe who is on screen, where they are, and\n"
+                    "  what they are doing, taken from the actual story you just wrote about.\n"
+                    "  Mining/resources story -> a site environmental auditor in hi-vis reviewing\n"
+                    "    survey data with an acquisition manager at the mine.\n"
+                    "  Automotive story -> engineers walking a European assembly line with their\n"
+                    "    new Chinese owners, pointing at the line.\n"
+                    "  Components/manufacturing -> a machinist and a visiting buyer measuring a\n"
+                    "    part at the machine.\n"
+                    "  Regulatory/approval story -> lawyers and executives working through filings\n"
+                    "    around a table covered in documents.\n"
+                    "  A boardroom handshake is the WRONG answer unless the story is literally\n"
+                    "  about a signing.\n"
+                    "- Real people, doing the work, always. NO empty buildings, NO city skylines,\n"
+                    "  NO abstract graphics, NO text, NO logos, NO branding."
                 )
             else:
                 image_requirements = (
@@ -317,6 +345,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             f"Angle to emphasise: {pillar.angle}\n"
             f"Key points to incorporate:\n{proof_points}\n\n"
             f"Tone guidance: {self.campaign.tone}.\n"
+            f"\n{PLAIN_ENGLISH_DIRECTIVE}\n"
             f"Apply these directives:\n{post_directives}\n"
             f"{news_requirements}"
             f"{chart_requirements}"
@@ -327,6 +356,10 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                 else ""
             )
             +             "\nOutput must be JSON with keys headline, body, cta, hashtags (list), image_prompt, video_prompt, alt_text.\n"
+            "- image_prompt and video_prompt are BOTH REQUIRED and must describe the SAME scene, "
+            "taken from the subject of THIS post: image_prompt as a still, video_prompt as that "
+            "scene in motion (what moves, what the camera does). Returning video_prompt empty puts "
+            "generic stock footage on the post, which is worse than no video.\n"
             "POST STRUCTURE (mandatory, applies to every pillar):\n"
             "- The post has TWO parts: (1) the BODY and (2) a single final paragraph in the 'cta' field.\n"
             "- BODY = authoritative, expert analysis in a thought-leadership voice. It must NOT mention "

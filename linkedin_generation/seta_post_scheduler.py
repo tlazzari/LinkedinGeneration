@@ -273,7 +273,11 @@ def generate_video_for_post(
     so the caller can fall back to a static Imagen image.
     16:9 aspect ratio is the only one Veo accepts.
     """
-    video_prompt = pillar.video_prompt or post.video_prompt or (
+    # post.video_prompt FIRST (2026-09-13). It is composed in the generator from
+    # this post's own subject and already carries the house rules appended in
+    # code; pillar.video_prompt is the fixed YAML fallback. The old order had the
+    # YAML first, so the video never had anything to do with the article.
+    video_prompt = post.video_prompt or pillar.video_prompt or (
         f"Cinematic 16:9 professional footage evoking {pillar.angle.lower()[:80]}. "
         "Atmospheric, documentary style, warm professional colour grade."
     )

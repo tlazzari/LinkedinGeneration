@@ -165,15 +165,96 @@ t.check('RULE: content generator prohibits empty buildings in image prompt',
 t.check('RULE: content generator prohibits city skylines without people',
         'NO city skylines without people' in gen_src or 'NO city skyline' in gen_src)
 
-# === RULE: YAML pillar.image_prompt takes priority over LLM-generated image_prompt ===
-t.check(
-    'RULE: pillar.image_prompt is primary (YAML wins over LLM output)',
-    'pillar.image_prompt or payload.get("image_prompt")' in gen_src,
+# === RULE: MEDIA MUST MATCH THE POST, AND THE MANDATE IS STILL ENFORCED ===
+# Superseded 2026-09-13. The old rule was "YAML pillar.image_prompt always wins",
+# written because the model kept proposing empty city skylines - a real failure,
+# and the reason the guarantee below has to be mechanical. But it also meant
+# every M&A post got the same Frankfurt boardroom handshake whatever the story:
+# a post about Chinese mining losses abroad and country environmental risk was
+# illustrated with two people signing a term sheet (Tom: "the video has nothing
+# or very little to do with the article").
+#
+# The new arrangement is STRICTER, not looser: the model supplies only the
+# SUBJECT, the YAML supplies the house look, and the mandate is appended in code
+# by compose_media_prompt() where no model output can drop it. A subject that
+# trips the ban list is discarded and the vetted YAML prompt is used unchanged.
+sys.path.insert(0, str(PKG_DIR.parent))
+from linkedin_generation.social.media_prompts import (
+    compose_media_prompt, is_safe_subject, BANNED_MEDIA_TERMS,
 )
-t.check(
-    'RULE: LLM image_prompt does NOT silently override YAML pillar.image_prompt',
-    'payload.get("image_prompt") or pillar.image_prompt' not in gen_src,
+
+t.check('RULE: media prompts are composed, not taken raw from either side',
+        'compose_media_prompt(' in gen_src)
+t.check('RULE: the model supplies the subject for THIS post',
+        'subject=payload.get("image_prompt")' in gen_src)
+t.check('RULE: the YAML prompt is the house look / fallback, not the whole prompt',
+        'house_prompt=pillar.image_prompt' in gen_src
+        and 'house_prompt=pillar.video_prompt' in gen_src)
+
+_banned = compose_media_prompt(
+    subject='Sweeping aerial view of the Frankfurt skyline at golden hour',
+    house_prompt='Advisors reviewing documents at a conference table.', kind='image')
+# NB: assert on the SUBJECT's own words, not on 'skyline' - the appended house
+# rules legitimately contain "No city skyline", which is the point of them.
+t.check('RULE: a skyline subject is REJECTED and the vetted YAML prompt is used',
+        'frankfurt' not in _banned.lower() and 'aerial view' not in _banned.lower()
+        and 'Advisors reviewing documents' in _banned)
+t.check('RULE: every banned term is actually rejected',
+        all(not is_safe_subject('A long enough scene description featuring a ' + term)
+            for term in BANNED_MEDIA_TERMS))
+
+_good = compose_media_prompt(
+    subject='Two automotive engineers on a European assembly line reviewing production data',
+    house_prompt='Cinematic boardroom.', kind='video')
+t.check('RULE: a story-specific subject SURVIVES into the prompt',
+        'assembly line' in _good and 'boardroom' not in _good.lower())
+t.check('RULE: the people/no-text/no-skyline mandate is appended in code either way',
+        all(frag in _good for frag in ('Real human professionals', 'No text', 'No city skyline'))
+        and all(frag in _banned for frag in ('Real human professionals', 'No text')))
+t.check('RULE: video prompts still carry 16:9',
+        '16:9' in _good and '16:9' in compose_media_prompt(
+            subject=None, house_prompt=None, kind='video'))
+t.check('RULE: an empty subject falls back rather than producing an empty prompt',
+        len(compose_media_prompt(subject=None, house_prompt=None, kind='image')) > 60)
+
+t.check('RULE: a missing video_prompt reuses the image subject, not the generic YAML',
+        'payload.get("video_prompt") or payload.get("image_prompt")' in gen_src)
+t.check('RULE: the scheduler prefers the post-specific video prompt over the YAML',
+        'post.video_prompt or pillar.video_prompt' in sched_src)
+t.check('RULE: the prompt tells the model a boardroom handshake is the wrong default',
+        'boardroom handshake is the WRONG answer' in gen_src)
+
+# === RULE: PLAIN ENGLISH FOR NON-NATIVE READERS ===
+# Both audiences read English as a second language (Chinese buy-side and Italian
+# owners for Seta; Chinese and European industrial buyers for TNT).
+from linkedin_generation.social.post_quality import (
+    hard_word_hits, avg_sentence_words, long_sentences, post_issues,
+    PLAIN_ENGLISH_DIRECTIVE, SETA_VOICE, TNT_VOICE,
 )
+
+t.check('RULE: both brands ask for plain English in the prompt',
+        'PLAIN_ENGLISH_DIRECTIVE' in gen_src
+        and 'PLAIN_ENGLISH_DIRECTIVE' in (PKG_DIR / 'social' / 'content_generation.py').read_text())
+t.check('RULE: plain English is on for every brand by default',
+        SETA_VOICE.plain_english and TNT_VOICE.plain_english)
+t.check('plain English: complex words are caught with their simpler replacement',
+        hard_word_hits('We utilise this to facilitate the process')
+        == {'utilise': 'use', 'facilitate': 'help'})
+t.check('plain English: inflected forms are caught too (scrutinizing, not just scrutinize)',
+        'scrutinize' in hard_word_hits('buyers are scrutinizing the accounts'))
+t.check('plain English: idioms are caught - they cannot be looked up word by word',
+        'headwinds' in hard_word_hits('the sector faces headwinds this year'))
+t.check('plain English: real industry vocabulary is NOT flagged',
+        hard_word_hits('The acquisition used a valuation model and due diligence findings') == {})
+t.check('plain English: an overlong sentence is caught',
+        len(long_sentences(' '.join(['word'] * 40) + '.')) == 1)
+t.check('plain English: sentence-length average is measured',
+        9 < avg_sentence_words('One two three four five six seven eight nine ten.') < 11)
+_complex = {'headline': 'A Headline', 'cta': 'And you?',
+            'body': 'We utilise a myriad of instruments to facilitate the transaction.\n\n'
+                    'Notwithstanding the headwinds, we will circle back prior to closing.'}
+t.check('plain English: the gate reports it as an issue for the retry',
+        any('too complex' in i for i in post_issues(_complex, SETA_VOICE)))
 
 # === RULE: Seta cron uses --daily flag (not --run-once) for Tue/Thu enforcement ===
 import subprocess

@@ -66,6 +66,125 @@ FILLER_TERMS = [
 ]
 
 
+# ── PLAIN ENGLISH FOR NON-NATIVE READERS (2026-09-13) ───────────────────────
+# Both audiences read English as a second language: Seta's is Chinese buy-side
+# and Italian owners, TNT's is Chinese and European industrial buyers. Tom,
+# 2026-09-13: "they are mainly aimed at non native english speakers, the language
+# used is too complicated, it should use some sort of simpler language but still
+# in a professional tone."
+#
+# Simple does NOT mean shorter or less expert. It means the Latinate verb gives
+# way to the ordinary one, the sentence stops at one idea, and no reader has to
+# decode an idiom. The industry nouns stay: "acquisition", "due diligence" and
+# "valuation" are the vocabulary of the audience's own job, and replacing them
+# would be condescending, not clear.
+HARD_WORDS = {
+    "utilise": "use", "utilize": "use", "endeavour": "try", "endeavor": "try",
+    "commence": "start", "terminate": "end", "ascertain": "find out",
+    "elucidate": "explain", "facilitate": "help", "disseminate": "spread",
+    "ameliorate": "improve", "exacerbate": "make worse", "mitigate": "reduce",
+    "predicated on": "based on", "notwithstanding": "despite",
+    "heretofore": "until now", "albeit": "although", "inasmuch": "since",
+    "vis-a-vis": "compared with", "vis-à-vis": "compared with",
+    "requisite": "needed", "myriad": "many", "plethora": "many",
+    "juxtaposition": "contrast", "proliferation": "spread",
+    "subsequently": "then", "furthermore": "also", "moreover": "also",
+    "consequently": "so", "henceforth": "from now on", "thereby": "so",
+    "whereby": "where", "aforementioned": "this", "prior to": "before",
+    "in order to": "to", "with regard to": "about", "in the event that": "if",
+    "a significant number of": "many", "at this juncture": "now",
+    "trajectory": "path", "paradigm": "model", "granular": "detailed",
+    "scrutinise": "check closely", "scrutinize": "check closely",
+    "verifiable": "provable", "pitfall": "risk", "nuance": "detail",
+    "underpin": "support", "delineate": "set out", "expedite": "speed up",
+    "leverage": "use", "incentivise": "encourage", "incentivize": "encourage",
+}
+
+# Idioms and metaphors are the single worst barrier for a second-language
+# reader: each one is a phrase whose meaning cannot be looked up word by word.
+IDIOMS = {
+    "headwinds": "problems", "tailwinds": "support",
+    "move the needle": "make a real difference", "circle back": "come back to",
+    "low-hanging fruit": "easy wins", "double down": "commit further",
+    "boil the ocean": "try to do everything", "bandwidth": "time",
+    "in the weeds": "in the detail", "north star": "main goal",
+    "boil down to": "come down to", "the elephant in the room": "the obvious problem",
+    "raise the bar": "set a higher standard", "a game of inches": "a slow process",
+    "punch above": "do better than", "kick the tyres": "check carefully",
+    "kick the tires": "check carefully", "on the table": "available",
+    "run the numbers": "do the maths", "moving parts": "separate pieces",
+}
+
+# A sentence with more than one idea in it is where non-native comprehension
+# actually breaks, well before vocabulary does.
+MAX_AVG_SENTENCE_WORDS = 22
+MAX_SINGLE_SENTENCE_WORDS = 34
+
+
+def split_sentences(text: str) -> List[str]:
+    parts = re.split(r"(?<=[.!?])\s+", text.replace("\n", " "))
+    return [p.strip() for p in parts if p.strip()]
+
+
+def _inflections(term: str) -> str:
+    """Regex for a term and its ordinary inflections.
+
+    Needed because the dictionary holds base forms while posts carry inflected
+    ones: the first live check found "scrutinizing" and "underscores" sailing
+    past an exact-match lookup for "scrutinize". Multi-word phrases are matched
+    literally - "predicated on" has no inflections worth chasing.
+    """
+    if " " in term or "-" in term:
+        return re.escape(term)
+    stem = term[:-1] if term.endswith("e") else term
+    return re.escape(stem) + r"(?:e|es|ed|ing|ation|ations|s|ly)?"
+
+
+def hard_word_hits(text: str) -> Dict[str, str]:
+    """Complex words present, mapped to the simpler word to use instead."""
+    lowered = text.lower()
+    found: Dict[str, str] = {}
+    for term, simpler in {**HARD_WORDS, **IDIOMS}.items():
+        # Word-bounded so a match inside a longer unrelated word or a URL cannot
+        # fire, while ordinary inflections still do.
+        if re.search(r"(?<!\w)" + _inflections(term) + r"(?!\w)", lowered):
+            found[term] = simpler
+    return found
+
+
+def long_sentences(text: str) -> List[int]:
+    return [len(s.split()) for s in split_sentences(text)
+            if len(s.split()) > MAX_SINGLE_SENTENCE_WORDS]
+
+
+def avg_sentence_words(text: str) -> float:
+    sentences = split_sentences(text)
+    if not sentences:
+        return 0.0
+    return sum(len(s.split()) for s in sentences) / len(sentences)
+
+
+# The same rule as prose, for the prompt. Kept next to the checks that enforce
+# it so the ask and the gate can never drift apart.
+PLAIN_ENGLISH_DIRECTIVE = (
+    "WRITE FOR A READER WHOSE FIRST LANGUAGE IS NOT ENGLISH. Most of this "
+    "audience reads English as a second or third language.\n"
+    "- One idea per sentence. Average under 20 words, never more than 34.\n"
+    "- Use the ordinary word, not the formal one: use (not utilise), start "
+    "(not commence), help (not facilitate), before (not prior to), also (not "
+    "furthermore), so (not consequently), shows (not underscores), risks (not "
+    "pitfalls), details (not nuances), reduce (not mitigate).\n"
+    "- NO idioms or metaphors. No 'headwinds', 'move the needle', 'low-hanging "
+    "fruit', 'double down', 'circle back'. A second-language reader cannot look "
+    "these up word by word.\n"
+    "- KEEP the industry terms: acquisition, due diligence, valuation, EBITDA, "
+    "joint venture. These are the vocabulary of the reader's own job — "
+    "simplifying them is condescending, not clear.\n"
+    "- Plain does NOT mean shallow or shorter. The analysis stays expert and "
+    "the tone stays professional; only the sentences get easier to read.\n"
+)
+
+
 @dataclass(frozen=True)
 class BrandVoice:
     """What the gate needs to know about one brand's copy."""
@@ -86,6 +205,9 @@ class BrandVoice:
     # Filler terms per 100 words. 2.5 is roughly half the archive median, so it
     # forces concrete nouns without being unreachable in one retry.
     max_filler_per_100_words: float = 2.5
+    # Both brands write for readers whose first language is not English, so the
+    # plain-English checks are ON by default for any new brand too.
+    plain_english: bool = True
 
 
 # Worn-out headline vocabulary, measured over each brand's own archive.
@@ -272,6 +394,28 @@ def post_issues(
                 f"{voice.max_filler_per_100_words}) — replace "
                 + ", ".join(f"'{term}' x{count}" for term, count in worst)
                 + " with concrete nouns, names and specifics"
+            )
+
+    if voice.plain_english and not is_holiday:
+        prose = f"{headline} {body} {cta}"
+        hard = hard_word_hits(prose)
+        if hard:
+            worst = sorted(hard.items())[:5]
+            issues.append(
+                "language too complex for second-language readers - replace "
+                + ", ".join(f"'{term}' with '{simpler}'" for term, simpler in worst)
+            )
+        avg = avg_sentence_words(body)
+        if avg > MAX_AVG_SENTENCE_WORDS:
+            issues.append(
+                f"sentences average {avg:.0f} words - keep the average under "
+                f"{MAX_AVG_SENTENCE_WORDS}; one idea per sentence"
+            )
+        overlong = long_sentences(body)
+        if overlong:
+            issues.append(
+                f"{len(overlong)} sentence(s) run to {max(overlong)} words - split "
+                f"anything over {MAX_SINGLE_SENTENCE_WORDS} into two"
             )
 
     paragraphs = [p for p in body.split("\n\n") if p.strip()]
