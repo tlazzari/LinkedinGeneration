@@ -132,6 +132,18 @@ PREFERRED_SOURCES_ZH = [
     "rfi.fr",          # RFI 中文
 ]
 
+# Ranked LAST, never excluded (2026-09-13). Two live runs pulled a Sohu
+# aggregator headline ("欧盟对我们下最后通牒…西方就动手") and an EIN Presswire item -
+# a paid press-release wire, not journalism - as the anchor for a post. Citing
+# those by name in front of an M&A audience costs more credibility than having no
+# story at all. They stay available so a thin week still produces a post, but only
+# once nothing better is on offer.
+DEMOTED_SOURCES = [
+    "sohu.com", "163.com", "baijiahao", "toutiao", "ifeng.com",
+    "einpresswire.com", "prnewswire", "businesswire", "globenewswire",
+    "openpr.com", "accesswire", "medium.com", "linkedin.com", "reddit.com",
+]
+
 # Preferred news sources (not restricted, just prioritized)
 PREFERRED_SOURCES = [
     "bloomberg.com",
@@ -588,22 +600,31 @@ def _best_source_label(url: str, result: dict) -> str:
     return label
 
 
+def _is_chinese(text: str) -> bool:
+    """Any CJK ideograph means this query belongs to the Chinese search."""
+    return any("\u4e00" <= ch <= "\u9fff" for ch in text)
+
+
 def _rank_key(result: dict):
-    """Chinese preferred outlets first, then Western preferred, then freshness."""
+    """Chinese preferred outlets, then Western preferred, then the rest, then wires."""
     url = (result.get("url") or "").lower()
+    age = result.get("age_days") if result.get("age_days") is not None else 999
+    if any(src in url for src in DEMOTED_SOURCES):
+        return (3, 0, age)
     for i, src in enumerate(PREFERRED_SOURCES_ZH):
         if src in url:
-            return (0, i, result.get("age_days") if result.get("age_days") is not None else 999)
+            return (0, i, age)
     for i, src in enumerate(PREFERRED_SOURCES):
         if src in url:
-            return (1, i, result.get("age_days") if result.get("age_days") is not None else 999)
-    return (2, 0, result.get("age_days") if result.get("age_days") is not None else 999)
+            return (1, i, age)
+    return (2, 0, age)
 
 
 def search_news_for_pillar(
     pillar_name: str,
     num_articles: int = 3,
     fetch_images: bool = True,
+    queries: Optional[List[str]] = None,
 ) -> List[NewsArticle]:
     """Find recent, specific news for a content pillar.
 
@@ -616,8 +637,17 @@ def search_news_for_pillar(
     were the ONLY fallbacks behind a Gemini call that always failed, so the
     whole chain returned nothing for three weeks.
     """
-    zh_queries = PILLAR_SEARCH_QUERIES_ZH.get(pillar_name, [])
-    en_queries = PILLAR_SEARCH_QUERIES.get(pillar_name, [])
+    # A pillar's OWN topics win over the name-keyed table (2026-09-13). The table
+    # is hardcoded China-Europe M&A, so without this every Bolla tenant that cloned
+    # the Seta template searched cross-border M&A news whatever its business was.
+    # Queries are used as written, in whatever language the company gave them:
+    # Chinese ones go to the Chinese search, the rest to the English one.
+    if queries:
+        zh_queries = [q for q in queries if _is_chinese(q)]
+        en_queries = [q for q in queries if not _is_chinese(q)]
+    else:
+        zh_queries = PILLAR_SEARCH_QUERIES_ZH.get(pillar_name, [])
+        en_queries = PILLAR_SEARCH_QUERIES.get(pillar_name, [])
     if not zh_queries and not en_queries:
         logger.warning(f"No search queries defined for pillar: {pillar_name}")
         return []
@@ -641,16 +671,19 @@ def search_news_for_pillar(
             all_results.append(r)
 
     # 1. Chinese first — this is where the Europe-China deal flow actually breaks.
+    #    For a tenant with no Chinese topics this loop is simply empty and English
+    #    carries the pillar, which is the right behaviour for a company whose
+    #    market is not China.
     for query in zh_queries[:2]:
         absorb(search_news_serpapi(query, num_results=8, lang="zh"))
         if len(all_results) >= num_articles * 2:
             break
 
     # 2. English, to widen the pool (and to carry the pillar if Chinese was thin).
-    if len(all_results) < num_articles:
+    if len(all_results) < num_articles * 2:
         for query in en_queries[:2]:
             absorb(search_news_serpapi(query, num_results=8, lang="en"))
-            if len(all_results) >= num_articles:
+            if len(all_results) >= num_articles * 2:
                 break
 
     # 3. Grounded Gemini as the last resort.
@@ -761,6 +794,8 @@ __all__ = [
     "fetch_article_preview_image",
     "PILLAR_SEARCH_QUERIES",
     "PILLAR_SEARCH_QUERIES_ZH",
+    "_is_chinese",
     "PREFERRED_SOURCES_ZH",
+    "DEMOTED_SOURCES",
     "MAX_ARTICLE_AGE_DAYS",
 ]

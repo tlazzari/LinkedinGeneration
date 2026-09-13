@@ -45,7 +45,11 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         news_context = ""
         if pillar.use_news_search and post_type != "holiday":
             logger.info(f"Searching for news articles for pillar: {pillar.name}")
-            news_articles = search_news_for_pillar(pillar.name, num_articles=3)
+            news_articles = search_news_for_pillar(
+                pillar.name,
+                num_articles=3,
+                queries=list(getattr(pillar, "news_queries", []) or []),
+            )
             news_context = build_news_context(news_articles)
             if news_articles:
                 logger.info(f"Found {len(news_articles)} news articles to reference")
@@ -144,7 +148,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             house_prompt=pillar.video_prompt,
             kind="video",
         )
-        alt_text = payload.get("alt_text") or f"Seta Capital insights on {pillar.name}"
+        alt_text = payload.get("alt_text") or f"{self.company} insights on {pillar.name}"
 
         metadata: Dict[str, str] = {
             "post_type": post_type,
@@ -160,9 +164,9 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         return GeneratedPost(
             pillar_name=pillar.name,
             target_client=pillar.target_client,
-            headline=payload.get("headline", "Seta Capital Insights"),
+            headline=payload.get("headline", f"{self.company} Insights"),
             body=payload.get("body", ""),
-            cta=payload.get("cta", "Connect with Seta Capital to explore opportunities."),
+            cta=payload.get("cta", f"Connect with {self.company} to explore opportunities."),
             hashtags=all_hashtags,
             image_prompt=image_prompt,
             video_prompt=video_prompt,
@@ -171,6 +175,26 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             metadata=metadata,
             news_articles=news_articles,
         )
+
+    @property
+    def company(self) -> str:
+        """The company this generator is writing AS.
+
+        THE LEAK THIS CLOSES (2026-09-13). Every one of these strings said "Seta
+        Capital" outright, including the system prompt ("You are the LinkedIn
+        marketing voice for Seta Capital, a boutique M&A advisory firm...") and
+        the default cta. The first Bolla tenant ever run through this pipeline -
+        an outdoor-furniture maker - produced a post that closed with "Seta
+        Capital observes these shifts as critical for cross-border M&A in outdoor
+        furniture". One client's post naming a different company is the worst
+        content leak this feature can have, and no amount of tenant DB isolation
+        touches it, because it is in the prompt.
+        """
+        from .brand import BRANDS
+        brand = BRANDS.get(getattr(self, "brand_key", "seta"))
+        if brand and brand.display_name:
+            return brand.display_name
+        return "Seta Capital"
 
     @staticmethod
     def _strip_urls(
@@ -220,9 +244,9 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         if post_type == "promotional":
             post_directives = (
                 "- BODY: deliver an authoritative strategic insight about cross-border M&A, "
-                "deal-making, or a specific industry vertical. Do NOT mention Seta Capital in the body.\n"
+                f"deal-making, or a specific industry vertical. Do NOT mention {self.company} in the body.\n"
                 "- Speak as an expert operator sharing a point of view, not as a firm advertising itself.\n"
-                "- The Seta Capital connection belongs ONLY in the final paragraph (cta field)."
+                f"- The {self.company} connection belongs ONLY in the final paragraph (cta field)."
             )
         elif post_type == "technical":
             # The source link is published as the FIRST COMMENT, never in the
@@ -234,20 +258,20 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             )
             post_directives = (
                 "- BODY: provide substantive analysis with specific data points. Do NOT mention "
-                "Seta Capital in the body — let the analysis itself demonstrate the expertise.\n"
+                f"{self.company} in the body — let the analysis itself demonstrate the expertise.\n"
                 "- Reference actual market trends, deals, or economic indicators.\n"
                 + url_directive
                 + "- Write in a knowledgeable, authoritative thought-leader voice.\n"
-                + "- The Seta Capital connection belongs ONLY in the final paragraph (cta field)."
+                + f"- The {self.company} connection belongs ONLY in the final paragraph (cta field)."
             )
         else:  # holiday
             image_hint = f"authentic celebrations of {holiday_name}"
             post_directives = (
                 f"- Headline must include '{holiday_name}' with a warm greeting.\n"
                 f"- BODY: acknowledge partners and connections in {holiday_locale}; keep it warm and "
-                "celebratory. Do NOT mention Seta Capital in the body.\n"
+                f"celebratory. Do NOT mention {self.company} in the body.\n"
                 "- Avoid overt business messaging.\n"
-                "- Sign off as Seta Capital ONLY in the final paragraph (cta field)."
+                f"- Sign off as {self.company} ONLY in the final paragraph (cta field)."
             )
 
         # News-enhanced requirements
@@ -273,7 +297,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                 "5. Where the source is Chinese-language, say so — that it was reported "
                 "in the Chinese press is itself informative for a European audience.\n"
                 "6. Do NOT paste any URL. The link is published as the first comment.\n"
-                "7. No Seta Capital in the body — the firm appears only in the cta.\n"
+                f"7. No {self.company} in the body — the company appears only in the cta.\n"
             )
         else:
             news_requirements = ""
@@ -287,7 +311,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                 "MANDATORY RULES for Market Intelligence posts:\n"
                 "1. Quote at least TWO specific numbers from the data above (e.g. EUR/CNY rate, GDP %, yield)\n"
                 "2. Explain what the movement means for cross-border M&A deal valuations or timing\n"
-                "3. Keep the BODY brand-free — do NOT mention Seta Capital in the analysis; the Seta connection goes in the final paragraph (cta) only\n"
+                f"3. Keep the BODY brand-free — do NOT mention {self.company} in the analysis; the company connection goes in the final paragraph (cta) only\n"
                 "4. Do NOT invent or estimate numbers — only use the figures provided above\n"
                 "5. Keep the tone analytical and authoritative — this is for CFOs and PE partners\n"
             )
@@ -332,8 +356,9 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         current_year = datetime.now().year
 
         return (
-            "You are the LinkedIn marketing voice for Seta Capital, a boutique M&A advisory firm "
-            "specializing in cross-border transactions between Europe and China.\n"
+            f"You are the LinkedIn voice for {self.company}. What this company does, "
+            f"who it sells to and how it talks is described below - do not assume any "
+            f"other industry, and never name a company other than {self.company}.\n"
             f"Strategy focus: {self.strategy_text}\n\n"
             f"IMPORTANT DATE CONTEXT: Today is {current_date}. The current year is {current_year}.\n"
             f"- Only reference news, data, and reports from the last 6 months ({current_year} or late {current_year - 1})\n"
@@ -363,7 +388,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             "POST STRUCTURE (mandatory, applies to every pillar):\n"
             "- The post has TWO parts: (1) the BODY and (2) a single final paragraph in the 'cta' field.\n"
             "- BODY = authoritative, expert analysis in a thought-leadership voice. It must NOT mention "
-            "Seta Capital, 'our firm', 'we', or any first-person brand reference. Pure insight only.\n"
+            f"{self.company}, 'our firm', 'we', or any first-person brand reference. Pure insight only.\n"
             "- BODY FORMATTING: 3-4 SHORT paragraphs separated by a blank line, each at most 3 sentences "
             "and under 60 words. Never one long block - LinkedIn hides everything after the first two "
             "lines behind 'see more', so the opening sentence must stand alone as a hook.\n"
@@ -377,7 +402,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             "'reach out', 'get in touch', 'our firm', 'our team', 'our expertise', 'we advise', "
             "'we help', 'trusted partner', 'discuss your strategic objectives', 'explore opportunities', "
             "'request a briefing'. Do not sell, do not offer services, do not invite enquiries.\n"
-            "- Seta Capital may be named AT MOST ONCE, in the cta paragraph only, as a plain "
+            f"- {self.company} may be named AT MOST ONCE, in the cta paragraph only, as a plain "
             "attribution of viewpoint - never as a pitch, and never in headline or body.\n"
             "- Keep total length 150-250 words across headline + body + cta.\n"
             "- Open with an attention-grabbing hook that feels timely and relevant.\n"

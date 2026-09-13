@@ -709,8 +709,15 @@ try:
             'dormant' not in _applied and 'dormant' not in BRANDS)
     t.check('RULE: a half-written config is skipped, not fatal',
             'broken' not in _applied)
-    t.check('RULE: a new page clones its template pipeline',
-            BRANDS['acme'].generator is BRANDS['tnt'].generator
+    # CHANGED 2026-09-13. This asserted that a new page clones its TEMPLATE's
+    # generator. It no longer does: every brand gets the generator carrying the
+    # three house rules (real news, media composed from the post's own subject,
+    # plain English), because TNT's generator has no news path and does not
+    # compose media, so cloning it silently dropped two of the three. The
+    # template now decides the VOICE; the pipeline is the same for everyone.
+    t.check('RULE: a new page gets the pipeline that carries the house rules',
+            BRANDS['acme'].generator is BRANDS['seta'].generator
+            and 'news' in BRANDS['acme'].capabilities
             and BRANDS['acme'].rotation_state_file == 'acme_scheduler_state.json')
     t.check('RULE: the new page gets its own tone',
             BRANDS['acme'].voice.ban_promotional is False
@@ -979,5 +986,144 @@ t.check('plain English: "leverage" as a verb is still caught',
         hard_word_hits('we leverage our network') == {'leverage': 'use'})
 t.check('plain English: protected phrases are declared, not hardcoded in the matcher',
         'leveraged buyout' in PROTECTED_PHRASES)
+
+# ============================================================================
+# BOLLA TENANT BRANDS — own subjects, shared rules, no leakage
+# ============================================================================
+# Before 2026-09-13 a tenant brand cloned its template's campaign YAML wholesale,
+# so a furniture maker cloning the Seta template posted about cross-border
+# China-Europe M&A and searched Chinese M&A news to do it. Pillars are now the
+# tenant's own; only the house RULES are inherited. Creating the first test
+# tenant immediately exposed three leaks, each pinned below.
+import json as _json, tempfile as _tmp, shutil as _sh
+from pathlib import Path as _P
+from linkedin_generation.social import brand_store as _bs
+from linkedin_generation.social.brand import BRANDS as _BR
+from linkedin_generation.social.brand_store import (
+    campaign_for, default_env_names, INHERITED_RULES,
+)
+
+_orig_dir = _bs.BRAND_DIR
+_tdir = _P(_tmp.mkdtemp())
+try:
+    _bs.BRAND_DIR = _tdir
+    (_tdir / 't7777_probe.json').write_text(_json.dumps({
+        'key': 't7777_probe', 'display_name': 'Probe Furniture Srl',
+        'template': 'tnt', 'tone': 'promotional', 'enabled': True,
+        'delivery': 'email', 'notify_email': 'x@probe.example',
+        'strategy': 'Outdoor furniture.',
+        'pillars': [{
+            'name': 'Outdoor furniture market',
+            'angle': 'sourcing and lead times',
+            'target_client': 'garden retail buyers',
+            'news_queries': ['outdoor furniture manufacturing', '户外家具 出口'],
+            'hashtags': ['#OutdoorFurniture'],
+        }],
+    }))
+    _bs.apply_configs()
+    _b = _BR['t7777_probe']
+
+    # --- the subjects are the tenant's own ---
+    _c = campaign_for('t7777_probe')
+    t.check('tenant: pillars come from the tenant, not the template',
+            _c is not None and [p.name for p in _c.pillars] == ['Outdoor furniture market'])
+    t.check('tenant: news topics are the tenant\'s own, not the M&A table',
+            list(_c.pillars[0].news_queries) == ['outdoor furniture manufacturing', '户外家具 出口'])
+    t.check('tenant: real news is ON unless explicitly disabled',
+            _c.pillars[0].use_news_search is True)
+    t.check('tenant: the image provider is a working one, not the gpt-image-1 default',
+            _c.image_provider.provider == 'google-imagen')
+
+    # --- the rules are inherited whatever the template ---
+    t.check('tenant: gets the generator that carries all three house rules',
+            _b.generator is _BR['seta'].generator)
+    t.check('tenant: news capability is inherited even from the tnt template',
+            'news' in _b.capabilities)
+    t.check('RULE: the inherited rules are declared, not implicit',
+            set(INHERITED_RULES) == {'coherent_media', 'real_news', 'plain_english'})
+
+    # --- LEAK 1: credentials must never be inherited ---
+    # Found live: a tenant inherited LINKEDIN_OWNER_URN / LINKEDIN_ACCESS_TOKEN -
+    # TNT Motion's, both set in .env - so --publish would have posted a tenant's
+    # content to TNT's own page.
+    t.check('LEAK: a tenant does NOT inherit TNT/Seta LinkedIn credentials',
+            _b.owner_env == 'T7777_PROBE_LINKEDIN_OWNER_URN'
+            and _b.token_env == 'T7777_PROBE_LINKEDIN_ACCESS_TOKEN')
+    t.check('LEAK: credential names are derived from the key, so they fail closed',
+            default_env_names('t1_x') == ('T1_X_LINKEDIN_OWNER_URN', 'T1_X_LINKEDIN_ACCESS_TOKEN'))
+    _builtin_envs = {e for k in ('seta', 'tnt')
+                     for e in (_BR[k].owner_env, _BR[k].token_env)}
+    t.check('LEAK: no tenant env name collides with a built-in brand',
+            _b.owner_env not in _builtin_envs and _b.token_env not in _builtin_envs)
+    t.check('LEAK: the runner refuses a built-in credential name outright',
+            "is configured to use a built-in brand's LinkedIn" in sched_src)
+
+    # --- LEAK 2: artefacts and state must not share a directory ---
+    t.check('LEAK: the tenant writes to its own output directory',
+            _b.output_dir == 'linkedin_generation/t7777_probe_posts'
+            and _b.output_dir != _BR['seta'].output_dir)
+    t.check('LEAK: rotation and campaign state are per tenant',
+            _b.rotation_state_file.startswith('t7777_probe')
+            and _b.campaign_state_file.startswith('t7777_probe'))
+    t.check('LEAK: the runner points output at the brand, not the CLI default',
+            'output_dir = Path(brand.output_dir)' in sched_src)
+
+    # --- LEAK 3: the post must not name another company ---
+    # The first tenant post ever generated closed with "Seta Capital observes
+    # these shifts as critical for cross-border M&A in outdoor furniture".
+    _gen_src = (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
+    t.check('LEAK: the generator writes AS the brand, not hardcoded Seta Capital',
+            'def company' in _gen_src and '{self.company}' in _gen_src)
+    t.check('LEAK: the system prompt no longer claims to be an M&A advisory firm',
+            'You are the LinkedIn marketing voice for Seta Capital' not in _gen_src)
+    t.check('LEAK: the default cta names the brand, not Seta Capital',
+            'Connect with Seta Capital to explore opportunities' not in _gen_src)
+    t.check('LEAK: the printed banner is not hardcoded to Seta',
+            'GENERATED SETA CAPITAL POST' not in sched_src)
+    t.check('LEAK: the delivery email is addressed from the right company',
+            'BRANDS[brand_key].display_name' in sched_src)
+
+    # --- built-ins are untouched by any of this ---
+    t.check('tenant work does not disturb Seta: it still uses its own YAML',
+            campaign_for('seta') is None)
+    t.check('tenant work does not disturb Seta: generator and credentials unchanged',
+            _BR['seta'].owner_env == 'SETA_LINKEDIN_OWNER_URN'
+            and _BR['seta'].output_dir == 'linkedin_generation/seta_posts')
+finally:
+    _bs.BRAND_DIR = _orig_dir
+    _sh.rmtree(_tdir, ignore_errors=True)
+    for _k in ('t7777_probe',):
+        _BR.pop(_k, None)
+    _bs.apply_configs()
+
+# --- the runner exists and only runs activated tenants ---
+_brand_sh = PROJECT_ROOT / 'bin' / 'run_daily_brand.sh'
+_disp_sh = PROJECT_ROOT / 'bin' / 'run_daily_tenants.sh'
+t.check('RULE: a generic per-brand runner exists', _brand_sh.is_file())
+t.check('RULE: a tenant dispatcher exists', _disp_sh.is_file())
+if _disp_sh.is_file():
+    _d = _disp_sh.read_text()
+    t.check('RULE: the dispatcher skips brands that are not active', "not active" in _d)
+    t.check('RULE: the dispatcher skips brands with no pillars', "no pillars defined yet" in _d)
+    t.check('RULE: the dispatcher never runs the built-in brands',
+            'case "$key" in seta|tnt) continue;;' in _d)
+    t.check('RULE: the dispatcher refuses to publish without the tenant\'s own credentials',
+            'no LinkedIn credentials and delivery is not set to email' in _d)
+t.check('RULE: an email-delivery brand is not asked for LinkedIn credentials',
+        'delivers by email - no LinkedIn credentials needed' in sched_src)
+
+# --- news source quality ---
+from linkedin_generation.social.news_search import DEMOTED_SOURCES, _rank_key
+t.check('news: press-release wires and aggregators rank below real outlets',
+        _rank_key({'url': 'https://m.sohu.com/a/1', 'age_days': 0})
+        > _rank_key({'url': 'https://cn.nikkei.com/y', 'age_days': 40}))
+t.check('news: a paid press-release wire is demoted', 'einpresswire.com' in DEMOTED_SOURCES)
+
+# --- Market Intelligence is no longer numbers with no story ---
+_mi = [p for p in load_seta_campaign().get('content_pillars', [])
+       if p.get('name') == 'Market Intelligence']
+if _mi:
+    t.check('RULE: Market Intelligence posts are built on news, not only figures',
+            _mi[0].get('use_news_search') is True and bool(_mi[0].get('news_queries')))
 
 sys.exit(t.summary())

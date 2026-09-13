@@ -86,9 +86,15 @@ class BaseContentGenerator:
         campaign: CampaignConfig,
         llm_client: Any,
         strategy_text: str,
+        brand_key: str | None = None,
     ) -> None:
         self.campaign = campaign
         self.llm_client = llm_client
+        # Which brand's material and voice this generator speaks with. Subclasses
+        # already set a hardcoded brand_key; an explicit one wins so the same
+        # generator class can serve any Bolla tenant without a subclass each.
+        if brand_key:
+            self.brand_key = brand_key
         self.strategy_text = strategy_text.strip()
         if not self.strategy_text:
             raise ValueError("Strategy text must not be empty")

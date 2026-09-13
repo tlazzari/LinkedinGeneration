@@ -124,7 +124,17 @@ content_pillars:
 - name: Market Intelligence
   use_veo: false
   use_chart: true
-  use_news_search: false
+  # Was false, so the post was nothing but recited figures - "EUR/CNY is 7.7762,
+  # the 10Y is 4.60%, German GDP +0.2%" - with no reason for anyone to care.
+  # Tom, 2026-09-13: "the article so technical sucks". Turned on 2026-09-13 so the
+  # numbers arrive attached to something that actually happened; the chart still
+  # supplies the figures and the unsupported-statistics gate still holds.
+  use_news_search: true
+  news_queries:
+  - 中欧 贸易 投资 数据
+  - 欧元 人民币 汇率 企业
+  - Europe China investment flows
+  - European manufacturing outlook deals
   target_client: >-
     PE fund partners, CFOs, and corporate development teams tracking macro
     conditions that affect cross-border deal valuations, financing costs,

@@ -176,6 +176,112 @@ def extra_context(brand_key: str, max_chars: int = 6000) -> str:
     return joined
 
 
+# House rules every brand inherits no matter what it sells. These live in the
+# pipeline, not in a pillar, so a tenant cannot switch them off and does not have
+# to know they exist: media composed from the post's own subject
+# (media_prompts.compose_media_prompt), posts built on real fetched news
+# (news_search), and plain English for second-language readers
+# (post_quality.PLAIN_ENGLISH_DIRECTIVE + the gate).
+INHERITED_RULES = ("coherent_media", "real_news", "plain_english")
+
+
+def default_env_names(brand_key: str) -> tuple[str, str]:
+    """(owner_env, token_env) derived from the brand key, never inherited.
+
+    THE LEAK THIS CLOSES (found 2026-09-13 by creating a test tenant): a new brand
+    cloned owner_env/token_env from its template, so a tenant that had not been
+    given its own credentials inherited LINKEDIN_OWNER_URN and
+    LINKEDIN_ACCESS_TOKEN - TNT Motion's, and both are set in /opt/linkedin/.env.
+    Running that tenant with --publish would have posted its content to TNT's own
+    LinkedIn page. Deriving the names from the key means an unconfigured tenant
+    resolves to variables that do not exist, so publishing fails closed.
+    """
+    stem = "".join(ch if ch.isalnum() else "_" for ch in brand_key).upper().strip("_")
+    return f"{stem}_LINKEDIN_OWNER_URN", f"{stem}_LINKEDIN_ACCESS_TOKEN"
+
+
+def campaign_for(brand_key: str) -> Optional["object"]:
+    """A CampaignConfig built from the tenant's OWN pillars, or None.
+
+    Before 2026-09-13 a tenant brand inherited `default_campaign_config` from the
+    template it cloned - i.e. Seta's or TNT's campaign YAML in full. A furniture
+    maker cloning the Seta template therefore posted about cross-border
+    China-Europe M&A, and searched Chinese M&A news to do it. Pillars are now the
+    tenant's own; only the RULES above are inherited.
+
+    Returns None when the brand has no pillars of its own, which is the case for
+    TNT and Seta themselves - they keep their YAML.
+    """
+    from .campaign_config import CampaignConfig
+
+    config = load_configs().get(brand_key) or {}
+    pillars = config.get("pillars") or []
+    if not pillars:
+        return None
+
+    entries = []
+    for p in pillars:
+        if not isinstance(p, dict) or not str(p.get("name") or "").strip():
+            continue
+        entries.append({
+            "name": str(p["name"]).strip(),
+            "target_client": str(p.get("target_client") or "").strip(),
+            "angle": str(p.get("angle") or "").strip(),
+            "proof_points": [str(x) for x in (p.get("proof_points") or []) if str(x).strip()],
+            "ctas": [str(x) for x in (p.get("ctas") or []) if str(x).strip()],
+            "hashtags": [str(x) for x in (p.get("hashtags") or []) if str(x).strip()],
+            "image_prompt": p.get("image_prompt") or None,
+            # News is ON unless the tenant explicitly turned it off: a post built
+            # on something that actually happened is the whole point.
+            "use_news_search": bool(p.get("use_news_search", True)),
+            "news_queries": [str(q) for q in (p.get("news_queries") or []) if str(q).strip()],
+            # Video is opt-in per pillar and needs a prompt; the subject is
+            # composed per post, so this is only the house look.
+            "use_veo": bool(p.get("use_veo", False)),
+            "video_prompt": p.get("video_prompt") or None,
+            "use_chart": bool(p.get("use_chart", False)),
+        })
+    if not entries:
+        return None
+
+    data = {
+        "defaults": {
+            "tone": str(config.get("tone_text") or config.get("strategy") or "").strip()
+                    or "Professional, concrete and readable.",
+            "hashtags": [str(h) for h in (config.get("default_hashtags") or []) if str(h).strip()],
+        },
+        "schedule": config.get("schedule") or {},
+        "content_pillars": entries,
+        "output": {"directory": f"linkedin_generation/{brand_key}_posts"},
+        # Without this the tenant inherits ImageProviderConfig's dataclass
+        # defaults - provider "openai", model "gpt-image-1" - which the pipeline's
+        # Google client then 404s on ("models/gpt-image-1 is not found"). The
+        # first tenant run produced a post with no image at all for exactly this
+        # reason. Same settings the built-in brands use; a brand config may
+        # override the block wholesale.
+        "image_provider": config.get("image_provider") or {
+            "provider": "google-imagen",
+            "model": "gemini-3.1-flash-image",
+            "size": "1080x1080",
+            "style_hint": (
+                "Photorealistic professional photography. Warm natural lighting. "
+                "Real people doing the work described. No text, no logos, no "
+                "branding in frame."
+            ),
+            "use_animated_gif": True,
+            "gif_num_frames": 5,
+            "gif_frame_duration": 900,
+            "curated_library": [],
+            "aspect_ratio": "1:1",
+        },
+    }
+    try:
+        return CampaignConfig.from_mapping(data)
+    except Exception as exc:
+        logger.warning("Brand '%s' has unusable pillars: %s", brand_key, exc)
+        return None
+
+
 def apply_configs() -> List[str]:
     """Merge stored configs into the in-memory registry. Returns keys applied.
 
@@ -191,6 +297,12 @@ def apply_configs() -> List[str]:
             if existing:
                 register_brand(replace(existing, voice=voice_from_config(config, existing.voice)))
             else:
+                # The template picks the VOICE. The GENERATOR is always Seta's,
+                # because that is the one carrying the three rules every brand
+                # inherits (see INHERITED_RULES): it fetches real news, composes
+                # media from the post's own subject, and runs the plain-English
+                # gate. TNT's generator has no news path and does not compose
+                # media, so cloning it would silently drop two of the three.
                 template_key = str(config.get("template") or "seta")
                 template = BRANDS.get(template_key)
                 if not template:
@@ -198,14 +310,18 @@ def apply_configs() -> List[str]:
                         "Brand '%s' names unknown template '%s' - skipped", key, template_key
                     )
                     continue
+                rules_source = BRANDS.get("seta") or template
+                default_owner, default_token = default_env_names(key)
                 register_brand(
                     replace(
                         template,
                         key=key,
+                        generator=rules_source.generator,
+                        capabilities=rules_source.capabilities,
                         display_name=str(config.get("display_name") or key),
                         voice=voice_from_config(config, template.voice),
-                        owner_env=str(config.get("owner_env") or template.owner_env),
-                        token_env=str(config.get("token_env") or template.token_env),
+                        owner_env=str(config.get("owner_env") or default_owner),
+                        token_env=str(config.get("token_env") or default_token),
                         campaign_config_env=str(
                             config.get("campaign_config_env") or template.campaign_config_env
                         ),
@@ -226,6 +342,9 @@ def apply_configs() -> List[str]:
 
 __all__ = [
     "BRAND_DIR",
+    "INHERITED_RULES",
+    "campaign_for",
+    "default_env_names",
     "DEFAULT_TONE",
     "TONE_PRESETS",
     "apply_configs",

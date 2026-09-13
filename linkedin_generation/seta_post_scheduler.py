@@ -31,6 +31,8 @@ from linkedin_generation.social.image_providers import (
     create_image_provider,
 )
 from linkedin_generation.social.news_search import fetch_article_preview_image
+from linkedin_generation.social.brand import BRANDS
+from linkedin_generation.social.brand_store import campaign_for
 from linkedin_generation.social.post_delivery import (
     delivery_mode as resolve_delivery_mode,
     delivery_recipients,
@@ -151,6 +153,14 @@ def parse_args() -> argparse.Namespace:
         "--publish",
         action="store_true",
         help="Publish generated posts directly to LinkedIn",
+    )
+    parser.add_argument(
+        "--brand",
+        type=str,
+        default=os.getenv("SOCIAL_BRAND", "seta"),
+        help="Which brand to run. 'seta' keeps the historical behaviour; a Bolla "
+             "tenant key (t<id>_<name>) runs that tenant's own pillars, news "
+             "topics, output directory and credentials.",
     )
     parser.add_argument(
         "--deliver",
@@ -365,7 +375,7 @@ def run_single_generation(
     brand_key: str = "seta",
 ) -> None:
     """Run a single post generation."""
-    logging.info("Running single Seta Capital post generation")
+    logging.info("Running single post generation for '%s'", brand_key)
 
     tz = ZoneInfo(campaign.timezone)
     scheduled_for = datetime.now(tz=tz)
@@ -522,7 +532,7 @@ def run_single_generation(
                 image=image_payload, fallback_dir=images_dir, timestamp=scheduled_for,
             )
         sent = send_post_email(
-            display_name=campaign.company_name if hasattr(campaign, "company_name") else "Seta Capital",
+            display_name=BRANDS[brand_key].display_name if brand_key in BRANDS else "Seta Capital",
             recipients=email_recipients,
             post_text=post.as_text,
             headline=post.headline,
@@ -601,7 +611,7 @@ def run_single_generation(
 
     # Print the generated post
     print("\n" + "=" * 60)
-    print("GENERATED SETA CAPITAL POST")
+    print(f"GENERATED POST — {BRANDS[brand_key].display_name if brand_key in BRANDS else 'Seta Capital'}")
     print("=" * 60)
     print(post.as_text)
     print("=" * 60)
@@ -643,6 +653,7 @@ def build_scheduled_job(
     publisher: Optional[LinkedInPublisher],
     delivery: str = "auto",
     deliver_to: Optional[List[str]] = None,
+    brand_key: str = "seta",
 ) -> callable:
     """Build the scheduled job function."""
     def job():
@@ -653,6 +664,7 @@ def build_scheduled_job(
             publisher=publisher,
             delivery=delivery,
             deliver_to=deliver_to,
+            brand_key=brand_key,
         )
     return job
 
@@ -689,6 +701,7 @@ def seta_daily_runner(
     holiday_config: Path,
     delivery: str = "auto",
     deliver_to: Optional[List[str]] = None,
+    brand_key: str = "seta",
 ) -> None:
     """Holiday-aware daily runner for Seta Capital.
 
@@ -733,6 +746,7 @@ def seta_daily_runner(
             publisher=publisher,
             delivery=delivery,
             deliver_to=deliver_to,
+            brand_key=brand_key,
         )
     else:
         # Regular Tue/Thu post
@@ -743,6 +757,7 @@ def seta_daily_runner(
             publisher=publisher,
             delivery=delivery,
             deliver_to=deliver_to,
+            brand_key=brand_key,
         )
 
 
@@ -756,6 +771,7 @@ def _run_holiday_post(
     publisher: Optional[LinkedInPublisher],
     delivery: str = "auto",
     deliver_to: Optional[List[str]] = None,
+    brand_key: str = "seta",
 ) -> None:
     """Generate and publish a holiday-specific post."""
     tz = ZoneInfo(campaign.timezone)
@@ -838,8 +854,29 @@ def main() -> None:
         # The config should already exist at ~/seta_linkedin_campaign.yaml
         raise FileNotFoundError(f"Please ensure {args.campaign_config} exists")
 
-    campaign = CampaignConfig.from_yaml(args.campaign_config)
-    logging.info(f"Loaded campaign with {len(campaign.pillars)} pillars")
+    # A tenant brand brings its OWN pillars; only the house rules are inherited
+    # (see brand_store.INHERITED_RULES). Falling through to the YAML is what TNT
+    # and Seta do, and what a tenant did before 2026-09-13 - which is why a
+    # furniture maker was posting about cross-border M&A.
+    brand_key = str(args.brand or "seta")
+    if brand_key not in BRANDS:
+        logging.error(
+            "Unknown brand '%s'. Known: %s", brand_key, ", ".join(sorted(BRANDS))
+        )
+        raise SystemExit(2)
+    brand = BRANDS[brand_key]
+
+    campaign = campaign_for(brand_key)
+    if campaign is not None:
+        logging.info(
+            "Brand '%s': %d pillar(s) of its own", brand_key, len(campaign.pillars)
+        )
+    else:
+        if not args.campaign_config.exists():
+            logging.error(f"Campaign config not found: {args.campaign_config}")
+            raise FileNotFoundError(f"Please ensure {args.campaign_config} exists")
+        campaign = CampaignConfig.from_yaml(args.campaign_config)
+        logging.info(f"Loaded campaign with {len(campaign.pillars)} pillars")
 
     # Load strategy
     strategy = load_strategy(args.strategy_file, args.strategy_text)
@@ -848,25 +885,79 @@ def main() -> None:
     llm_client = create_llm_client(provider=args.llm_provider, model=args.llm_model)
 
     # Create generator
-    generator = SetaLinkedInPostGenerator(
+    generator_cls = brand.generator
+    generator = generator_cls(
         campaign=campaign,
         llm_client=llm_client,
         strategy_text=strategy,
+        brand_key=brand_key,
     )
 
     # Create publisher if configured
+    # Credentials come from the BRAND's own env variables for a tenant. Reusing
+    # the CLI defaults (which read SETA_LINKEDIN_*) would publish a tenant's post
+    # to Seta Capital's page - the single worst leak this feature could have.
     publisher = None
-    if args.publish and args.linkedin_owner and args.linkedin_access_token:
+    owner_urn = args.linkedin_owner
+    access_token = args.linkedin_access_token
+
+    # Resolve the delivery choice HERE, not just inside the generation call: a
+    # brand set to email delivery must not be asked for LinkedIn credentials at
+    # all. The generic runner passes --publish for every brand, so without this
+    # an email-only tenant fails on a credential check for a page it will never
+    # post to (seen on the first dispatcher run, 2026-09-13).
+    effective_delivery = args.deliver
+    if effective_delivery == "auto":
+        effective_delivery = resolve_delivery_mode(brand_key)
+    if effective_delivery == "email":
+        logging.info(
+            "Brand '%s' delivers by email - no LinkedIn credentials needed", brand_key
+        )
+        args.publish = False
+
+    if brand_key != "seta":
+        # Refuse outright to use a built-in brand's credentials, whatever the
+        # config says. brand_store derives per-brand variable names so this
+        # cannot normally happen, but a hand-edited config could name
+        # SETA_LINKEDIN_ACCESS_TOKEN directly and publish a tenant's post to
+        # Seta Capital's page. Fail closed instead.
+        builtin_envs = {
+            e for k in ("seta", "tnt") if k in BRANDS
+            for e in (BRANDS[k].owner_env, BRANDS[k].token_env)
+        }
+        if brand.owner_env in builtin_envs or brand.token_env in builtin_envs:
+            logging.error(
+                "Brand '%s' is configured to use a built-in brand's LinkedIn "
+                "credentials (%s / %s) - refusing to run. Give it its own.",
+                brand_key, brand.owner_env, brand.token_env,
+            )
+            raise SystemExit(4)
+        owner_urn = os.getenv(brand.owner_env, "")
+        access_token = os.getenv(brand.token_env, "")
+        if args.publish and not (owner_urn and access_token):
+            logging.error(
+                "Brand '%s' is set to publish but %s / %s are not set in the "
+                "environment - refusing to fall back to another brand's page. "
+                "Use email delivery instead.",
+                brand_key, brand.owner_env, brand.token_env,
+            )
+            raise SystemExit(3)
+    if args.publish and owner_urn and access_token:
         publisher_config = LinkedInPublisherConfig(
-            owner_urn=args.linkedin_owner,
-            access_token=args.linkedin_access_token,
+            owner_urn=owner_urn,
+            access_token=access_token,
         )
         publisher = LinkedInPublisher(publisher_config)
-        logging.info("LinkedIn publishing enabled")
+        logging.info("LinkedIn publishing enabled for '%s'", brand_key)
 
-    # Ensure output directory
+    # Ensure output directory. A tenant writes to its OWN directory, never the
+    # shared seta_posts tree - artefacts carry the post text, the news sources and
+    # the media, so a shared directory would leak one tenant's work to the next.
     output_dir = args.output_dir
+    if brand_key != "seta":
+        output_dir = Path(brand.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    logging.info("Brand '%s' writing to %s", brand_key, output_dir)
 
     if args.daily:
         seta_daily_runner(
@@ -877,6 +968,7 @@ def main() -> None:
             holiday_config=args.holiday_config,
             delivery=args.deliver,
             deliver_to=[e.strip() for e in args.deliver_to.split(",") if e.strip()],
+            brand_key=brand_key,
         )
         return
 
@@ -888,6 +980,7 @@ def main() -> None:
             publisher=publisher,
             delivery=args.deliver,
             deliver_to=[e.strip() for e in args.deliver_to.split(",") if e.strip()],
+            brand_key=brand_key,
         )
         return
 

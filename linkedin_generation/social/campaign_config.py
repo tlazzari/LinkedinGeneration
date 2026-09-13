@@ -32,6 +32,12 @@ class PostPillar:
     hashtags: Sequence[str] = field(default_factory=list)
     image_prompt: str | None = None
     use_news_search: bool = False
+    # Search topics for THIS pillar, in the company's own words and language
+    # (2026-09-13). Added because news topics used to be looked up by pillar NAME
+    # in a hardcoded China-Europe M&A table, so any tenant cloning the Seta
+    # template searched Chinese cross-border M&A news no matter what it sold.
+    # Empty falls back to that table, which is what TNT and Seta still use.
+    news_queries: Sequence[str] = field(default_factory=list)
     # Veo video generation: set True to generate an MP4 instead of a static image.
     # RULE: if use_veo=True, video_prompt must be set and be 16:9 safe (no people).
     use_veo: bool = False
@@ -54,7 +60,16 @@ class CampaignConfig:
 
     @classmethod
     def from_yaml(cls, path: Path) -> "CampaignConfig":
-        data = yaml.safe_load(path.read_text()) or {}
+        return cls.from_mapping(yaml.safe_load(path.read_text()) or {})
+
+    @classmethod
+    def from_mapping(cls, data: dict) -> "CampaignConfig":
+        """Build a campaign from a plain dict.
+
+        Split out of from_yaml (2026-09-13) so a Bolla tenant's pillars, which are
+        edited in the CRM and stored as JSON, can drive the pipeline directly
+        instead of the tenant inheriting Seta's or TNT's campaign YAML wholesale.
+        """
 
         defaults = data.get("defaults", {})
         tone = defaults.get(
@@ -91,6 +106,7 @@ class CampaignConfig:
                     hashtags=list(entry.get("hashtags", [])),
                     image_prompt=entry.get("image_prompt"),
                     use_news_search=entry.get("use_news_search", False),
+                    news_queries=[str(q).strip() for q in entry.get("news_queries", []) if str(q).strip()],
                     use_veo=use_veo,
                     video_prompt=video_prompt,
                     use_chart=use_chart,
