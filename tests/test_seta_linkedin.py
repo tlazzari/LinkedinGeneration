@@ -1126,4 +1126,22 @@ if _mi:
     t.check('RULE: Market Intelligence posts are built on news, not only figures',
             _mi[0].get('use_news_search') is True and bool(_mi[0].get('news_queries')))
 
+# ── The muted alarm must not come back (2026-09-13) ─────────────────────────
+# test_linkedin_systems.py carried an exclusion for 'parse Gemini search
+# response' in its log-error check, annotated "news search returns empty, post
+# continues". That exclusion was filtering out the single line reporting the
+# three-week news outage, which is why the suite stayed green through all of it.
+# Removed - and now guarded, because the tempting thing to do with a noisy log
+# check is to silence it again.
+_sys_test = _P('/opt/scripts/test_linkedin_systems.py')
+if _sys_test.exists():
+    _st = _sys_test.read_text()
+    _filter_block = _st.split('# Filter out known-OK patterns')[1].split('test(')[0] if '# Filter out known-OK patterns' in _st else ''
+    t.check('RULE: the news-parse error is NOT excluded from the log check again',
+            "and 'parse Gemini search response' not in ln" not in _filter_block)
+    t.check('RULE: NEWS_OUTAGE is never filtered out of the log check',
+            'NEWS_OUTAGE' not in _filter_block)
+    t.check('RULE: the removal is explained where the next person will look',
+            'REMOVED 2026-09-13' in _st)
+
 sys.exit(t.summary())
