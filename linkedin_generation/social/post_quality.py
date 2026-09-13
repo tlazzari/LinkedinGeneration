@@ -223,6 +223,13 @@ class BrandVoice:
     # Both brands write for readers whose first language is not English, so the
     # plain-English checks are ON by default for any new brand too.
     plain_english: bool = True
+    # How often the company may be named. One is right for a post meant to be
+    # reshared from a personal profile - more reads as an advert. It is WRONG for
+    # a brand that is openly a sales channel: TNT's own prompt asks for the name
+    # in the copy and a direct CTA, so a correct TNT post was being marked down
+    # for naming TNT twice (seen 2026-09-13 on a pull-stud post that was
+    # otherwise exactly right).
+    max_brand_mentions: int = 1
 
 
 # Worn-out headline vocabulary, measured over each brand's own archive.
@@ -242,6 +249,10 @@ SETA_VOICE = BrandVoice(
 TNT_VOICE = BrandVoice(
     name="TNT Motion",
     ban_promotional=False,
+    # TNT is a sales channel by design: the prompt asks for the name in the copy
+    # and a direct CTA, so naming it in the body and again in the close is the
+    # intended shape, not a defect.
+    max_brand_mentions=3,
     brand_in_closing_only=False,
     overused_headline_terms=(
         "myth",
@@ -383,8 +394,12 @@ def post_issues(
 
     brand = re.escape(voice.name)
     brand_count = len(re.findall(brand, whole, flags=re.IGNORECASE))
-    if brand_count > 1:
-        issues.append(f"{voice.name} named {brand_count} times - name it at most once")
+    if brand_count > voice.max_brand_mentions:
+        _limit = voice.max_brand_mentions
+        issues.append(
+            f"{voice.name} named {brand_count} times - name it at most "
+            + ("once" if _limit == 1 else f"{_limit} times")
+        )
     if voice.brand_in_closing_only and re.search(
         brand, f"{headline} {body}", flags=re.IGNORECASE
     ):

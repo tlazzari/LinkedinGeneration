@@ -14,6 +14,7 @@ import random
 from .manual_knowledge import build_lubrication_installation_context, build_case_study_context
 from .base_content import GeneratedPost, BaseContentGenerator
 from .media_prompts import compose_media_prompt
+from .news_search import NewsArticle, build_news_context, search_news_for_pillar
 from .post_quality import PLAIN_ENGLISH_DIRECTIVE, TNT_VOICE, apply_fixes, post_issues
 
 logger = logging.getLogger(__name__)
@@ -43,21 +44,44 @@ class LinkedInPostGenerator(BaseContentGenerator):
         image_mode: str,
         holiday: "HolidayEvent" | None = None,
     ) -> GeneratedPost:
+        # TNT was the last brand writing from nothing (2026-09-13). Every post was
+        # invented from the pillar angle, which is why they read interchangeably.
+        # It was left out because industrial parts were assumed to have no press;
+        # measuring it disproved that - "bearing manufacturer industry" returns 18
+        # fresh articles and Modern Machine Shop covers collets - so long as the
+        # phrases aim at the industry rather than the part. See rules_seta.md.
+        news_articles: List[NewsArticle] = []
+        news_context = ""
+        if pillar.use_news_search and post_type != "holiday":
+            logger.info("Searching for news for TNT pillar: %s", pillar.name)
+            news_articles = search_news_for_pillar(
+                pillar.name,
+                num_articles=3,
+                queries=list(getattr(pillar, "news_queries", []) or []),
+            )
+            news_context = build_news_context(news_articles)
+            if not news_articles:
+                logger.warning("No news found for TNT pillar '%s'", pillar.name)
+
         raw = self.llm_client.complete(
             self._build_prompt(
                 pillar=pillar,
                 post_type=post_type,
                 image_mode=image_mode,
                 holiday=holiday,
+                news_context=news_context,
             ),
             temperature=0.8,
             max_tokens=650,
         )
-        payload = self._parse_response(raw)
+        payload = self._strip_urls(self._parse_response(raw))
 
         # Same gate as Seta, with TNT's own policy: its direct CTA is wanted, so
         # only the conversation, formatting, vocabulary and sourcing rules bite.
-        sources = "\n".join(pillar.proof_points or [])
+        # Everything the post is allowed to cite. Without news_context here the
+        # unsupported-statistics check would flag figures that came from the very
+        # articles we handed the model.
+        sources = "\n".join(filter(None, ["\n".join(pillar.proof_points or []), news_context]))
         issues = post_issues(payload, TNT_VOICE, sources=sources, post_type=post_type)
         if issues:
             logger.warning(
@@ -70,12 +94,13 @@ class LinkedInPostGenerator(BaseContentGenerator):
                     post_type=post_type,
                     image_mode=image_mode,
                     holiday=holiday,
+                    news_context=news_context,
                     quality_feedback=issues,
                 ),
                 temperature=0.8,
                 max_tokens=650,
             )
-            retry_payload = self._parse_response(retry_raw)
+            retry_payload = self._strip_urls(self._parse_response(retry_raw))
             if len(post_issues(retry_payload, TNT_VOICE, sources=sources, post_type=post_type)) < len(issues):
                 payload = retry_payload
 
@@ -127,12 +152,23 @@ class LinkedInPostGenerator(BaseContentGenerator):
             body=payload.get("body", ""),
             cta=payload.get("cta", "Talk to TNT Motion's engineering team for a tailored proposal."),
             hashtags=all_hashtags,
+            news_articles=news_articles,
             image_prompt=image_prompt,
             video_prompt=video_prompt,
             alt_text=alt_text,
             created_at=scheduled_for,
             metadata=metadata,
         )
+
+    @staticmethod
+    def _strip_urls(payload: Dict[str, Any]) -> Dict[str, Any]:
+        """No URL ever reaches the body — LinkedIn demotes posts carrying one."""
+        import re as _re
+        url_pattern = _re.compile(r'\[?(https?://[^\s\]\)]+)\]?(?:\([^\)]+\))?')
+        for name in ("body", "headline", "cta"):
+            if name in payload and isinstance(payload[name], str):
+                payload[name] = _re.sub(r'\s{2,}', ' ', url_pattern.sub('', payload[name])).strip()
+        return payload
 
     def _build_prompt(
         self,
@@ -141,6 +177,7 @@ class LinkedInPostGenerator(BaseContentGenerator):
         post_type: str,
         image_mode: str,
         holiday: "HolidayEvent" | None = None,
+        news_context: str = "",
             quality_feedback: Optional[list] = None,
     ) -> str:
         # Randomly select a subset of proof points to ensure variety across posts
@@ -285,7 +322,24 @@ class LinkedInPostGenerator(BaseContentGenerator):
             f"Tone guidance: {self.campaign.tone}.\n"
             f"Apply these directives:\n{post_directives}\n"
             f"\n{PLAIN_ENGLISH_DIRECTIVE}\n"
-            "Output must be JSON with keys headline, body, cta, hashtags (list), image_prompt, video_prompt, alt_text.\n"
+            + (
+                "\nREAL NEWS FETCHED TODAY — build the post on it:\n"
+                f"{news_context}\n"
+                "TNT-specific rules for using it:\n"
+                "1. Open on the actual development — the company, the machine, the failure, "
+                "the market move. Not a theme.\n"
+                "2. Name the outlet and when it reported. Never 'recent reports' or "
+                "'industry data'.\n"
+                "3. Carry over one concrete figure from the reporting. Invent nothing: if a "
+                "number is not in the material above, it does not go in the post.\n"
+                "4. THEN connect it to what TNT actually supplies — the bearing, collet, "
+                "toolholder or service that bears on what just happened, and why it matters "
+                "to the reader's machine. The news earns the attention; the product answers "
+                "it. A post that only summarises the news is a wasted post for TNT.\n"
+                "5. Do NOT paste any URL — the link is published as the first comment.\n"
+                if news_context else ""
+            )
+            + "Output must be JSON with keys headline, body, cta, hashtags (list), image_prompt, video_prompt, alt_text.\n"
             + (
                 f"\nCOMPANY-SPECIFIC MATERIAL (supplied by the account owner - treat as "
                 f"authoritative for facts about this company):\n{brand_material}\n"

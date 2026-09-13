@@ -86,7 +86,12 @@ BRANDS: Dict[str, Brand] = {
         sentinel_log="tnt_linkedin_daily.log",
         owner_env="LINKEDIN_OWNER_URN",
         token_env="LINKEDIN_ACCESS_TOKEN",
-        capabilities=frozenset({"logo_overlay", "biweekly_site_update", "animated_gif", "holiday"}),
+        # "news" added 2026-09-13. TNT was left out on the assumption that
+        # industrial parts have no press; measuring it disproved that - "bearing
+        # manufacturer industry" returns 18 fresh articles - so long as the search
+        # phrases aim at the industry rather than the part number.
+        capabilities=frozenset({"news", "logo_overlay", "biweekly_site_update",
+                                "animated_gif", "holiday"}),
         voice=TNT_VOICE,
     ),
     "seta": Brand(

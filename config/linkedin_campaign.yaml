@@ -39,6 +39,11 @@ image_provider:
     alt_text: Close-up of industrial bearings lined on a production table
 content_pillars:
 - name: 'Myth Busters: Bearing Secrets They Never Told You'
+  use_news_search: true
+  news_queries:
+  - bearing manufacturer industry
+  - bearing technology development
+  - 轴承 行业
   target_client: 'Maintenance engineers, purchasing managers, and plant operators who make daily decisions
 
     about bearing selection and care based on outdated assumptions or vendor marketing.
@@ -79,6 +84,11 @@ content_pillars:
 
     '
 - name: 'When Bearings Fail: Forensic Stories from the Field'
+  use_news_search: true
+  news_queries:
+  - bearing failure maintenance industry
+  - predictive maintenance rotating equipment
+  - equipment downtime manufacturing
   target_client: 'Reliability engineers, maintenance supervisors, and operations managers who deal with
 
     unexpected equipment failures and need to prevent recurrence.
@@ -120,6 +130,11 @@ content_pillars:
 
     '
 - name: 'Extreme Applications: Bearings at the Limit'
+  use_news_search: true
+  news_queries:
+  - high temperature bearing application
+  - wind turbine bearing
+  - heavy industry equipment reliability
   target_client: 'OEM design engineers, R&D teams, and technical directors working on high-performance
 
     machinery in demanding environments - from Arctic installations to cleanroom robotics.
@@ -161,6 +176,11 @@ content_pillars:
 
     '
 - name: 'Inside the Factory: Stories from Our Engineers'
+  use_news_search: true
+  news_queries:
+  - precision manufacturing China factory
+  - 机械制造 工厂 产能
+  - manufacturing quality control industry
   target_client: 'Technical decision-makers who want to understand the people and processes behind
 
     the products - building trust through transparency and human connection.
@@ -201,6 +221,11 @@ content_pillars:
 
     '
 - name: 'Product Spotlight: Speciality & Non-Standard Solutions'
+  use_news_search: true
+  news_queries:
+  - custom engineered components industry
+  - non standard bearing application
+  - special machinery components
   target_client: >
     Design engineers, OEM procurement teams, and distributors sourcing speciality components
     for demanding or non-standard applications — CNC machining, fastening systems, high-temperature
@@ -240,6 +265,12 @@ content_pillars:
     dramatic directional lighting that reveals metallic texture and engineering tolerances. No text,
     no logos, no labels anywhere in the image.
 - name: 'Workholding Precision: Collets, Pull Studs & Morse Tapers'
+  use_news_search: true
+  news_queries:
+  - machine tool workholding industry
+  - CNC machining industry news
+  - toolholding spindle technology
+  - 机床 行业
   target_client: >
     CNC machining centre operators, toolroom managers, spindle repair technicians, and
     OEM machine-tool manufacturers who specify the interface between spindle and cutting

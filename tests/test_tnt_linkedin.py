@@ -144,4 +144,71 @@ t.check('RULE: TNT passes its logo into the image provider',
 t.check('RULE: GIF provider honours a per-brand logo_path',
         'self.logo_path' in tnt_prov_src)
 
+# ============================================================================
+# TNT NOW BUILDS ON REAL NEWS (2026-09-13)
+# ============================================================================
+# TNT was the last brand writing from nothing: every post invented from the
+# pillar angle, which is why they read interchangeably. It had been left out on
+# the assumption that industrial parts have no press. Measuring it disproved
+# that - "bearing manufacturer industry" returns 18 fresh articles and Modern
+# Machine Shop covers collets - PROVIDED the search phrases aim at the industry
+# or the machine rather than the part number. See rules_seta.md.
+import sys as _sys
+_sys.path.insert(0, str(PKG_DIR.parent))
+_sys.path.insert(0, os.getenv('COMMONLIB_ROOT', '/opt/commonlib'))
+
+from linkedin_generation.social.brand import BRANDS as _BR
+from linkedin_generation.social.post_quality import post_issues, TNT_VOICE, SETA_VOICE
+
+_cg = (PKG_DIR / 'social' / 'content_generation.py').read_text()
+t.check('RULE: TNT declares the news capability', 'news' in _BR['tnt'].capabilities)
+t.check('RULE: TNT actually fetches news', 'search_news_for_pillar(' in _cg)
+t.check('RULE: TNT uses its pillar\'s own search phrases',
+        'news_queries' in _cg.split('search_news_for_pillar(')[1][:220])
+t.check('RULE: fetched news counts as a source, so its figures are not called invented',
+        'news_context' in _cg.split('sources =')[1][:200])
+t.check('RULE: no URL reaches a TNT body - the link goes in the first comment',
+        'def _strip_urls' in _cg)
+t.check('RULE: TNT carries the articles onto the post for the source comment',
+        'news_articles=news_articles' in _cg)
+# Match a fragment on ONE source line: the sentence is split across a
+# concatenation, so it never appears contiguously in the file.
+t.check('RULE: TNT is told to connect the news to what it actually supplies',
+        'The news earns the attention; the product answers' in _cg)
+t.check('RULE: TNT must attribute by outlet and date, not "recent reports"',
+        "Never 'recent reports'" in _cg)
+
+_ts = (PKG_DIR / 'linkedin_post_scheduler.py').read_text()
+t.check('RULE: TNT publishes its sources as the first comment',
+        'build_source_comment(' in _ts and 'comment_on_post(' in _ts)
+
+# Every TNT pillar must have phrases, and they must aim at the industry - a
+# phrase naming only the part returns nothing (measured: "collet chuck tooling"
+# gets zero from mainstream news while "bearing manufacturer industry" gets 18).
+_camp = load_tnt_campaign() if 'load_tnt_campaign' in dir() else None
+if _camp is None:
+    import yaml as _yaml
+    _camp = _yaml.safe_load(open(os.getenv(
+        'LINKEDIN_CAMPAIGN_CONFIG', str(PKG_DIR.parent / 'config' / 'linkedin_campaign.yaml'))))
+for _p in _camp.get('content_pillars', []):
+    _n = _p.get('name', '?')[:34]
+    t.check(f'RULE: TNT pillar "{_n}" searches news', bool(_p.get('use_news_search')))
+    t.check(f'RULE: TNT pillar "{_n}" has its own search phrases',
+            len(_p.get('news_queries') or []) >= 2)
+    t.check(f'RULE: TNT pillar "{_n}" phrases carry no hardcoded year',
+            not any(__import__('re').search(r'\b(19|20)\d{2}\b', q)
+                    for q in (_p.get('news_queries') or [])))
+
+# TNT is a sales channel: naming itself twice is the intended shape, not a defect.
+_promo = {'headline': 'H', 'body': 'TNT Motion makes these. TNT Motion ships fast.',
+          'cta': 'Ask TNT Motion. And you?'}
+t.check('RULE: a promotional brand may name itself more than once',
+        not [i for i in post_issues(_promo, TNT_VOICE) if 'named' in i])
+t.check('RULE: a reshareable brand still may not',
+        [i for i in post_issues({'headline': 'H', 'body': 'Seta Capital did this.',
+                                 'cta': 'Seta Capital again. And you?'}, SETA_VOICE)
+         if 'named' in i])
+t.check('RULE: the limit is declared per voice, not hardcoded',
+        TNT_VOICE.max_brand_mentions > SETA_VOICE.max_brand_mentions)
+
 sys.exit(t.summary())

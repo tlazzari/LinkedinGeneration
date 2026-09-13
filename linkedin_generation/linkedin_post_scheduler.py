@@ -38,6 +38,7 @@ from linkedin_generation.holiday.calendars import load_calendars
 from linkedin_generation.holiday.scheduler import HolidayAwareScheduler
 from linkedin_generation.social.logo_overlay import add_logo_to_image
 from linkedin_generation.social.artifacts import slugify, save_artifacts
+from linkedin_generation.seta_post_scheduler import build_source_comment
 # CRITICAL: Token auto-renewal - DO NOT REMOVE unless expressly commanded
 # This ensures LinkedIn tokens are automatically refreshed before expiration
 from linkedin_generation.token_manager import ensure_valid_token
@@ -523,6 +524,15 @@ def daily_runner(
         )
         if publish_result.get("share_urn"):
             extra_metadata["linkedin_share_urn"] = publish_result["share_urn"]
+            # Source links go in the first comment, never the body: LinkedIn
+            # suppresses reach on posts carrying an outbound link. Best effort -
+            # the post is already live, so a failure here is logged, not raised.
+            _c = build_source_comment(getattr(post, "news_articles", None) or [])
+            if _c:
+                extra_metadata["source_comment"] = (
+                    "posted" if publisher.comment_on_post(
+                        share_urn=publish_result["share_urn"], text=_c) else "failed"
+                )
         if publish_result.get("permalink"):
             extra_metadata["linkedin_permalink"] = publish_result["permalink"]
         extra_metadata["linkedin_asset"] = publish_result.get("asset", "")
@@ -672,6 +682,12 @@ def build_job(
                 raise
             if publish_result.get("share_urn"):
                 extra_metadata["linkedin_share_urn"] = publish_result["share_urn"]
+                _c = build_source_comment(getattr(post, "news_articles", None) or [])
+                if _c:
+                    extra_metadata["source_comment"] = (
+                        "posted" if publisher.comment_on_post(
+                            share_urn=publish_result["share_urn"], text=_c) else "failed"
+                    )
             if publish_result.get("permalink"):
                 extra_metadata["linkedin_permalink"] = publish_result["permalink"]
             extra_metadata["linkedin_asset"] = publish_result.get("asset", "")
