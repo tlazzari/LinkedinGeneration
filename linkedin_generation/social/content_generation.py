@@ -13,6 +13,7 @@ import random
 
 from .manual_knowledge import build_lubrication_installation_context, build_case_study_context
 from .base_content import GeneratedPost, BaseContentGenerator
+from .media_prompts import compose_media_prompt
 from .post_quality import PLAIN_ENGLISH_DIRECTIVE, TNT_VOICE, apply_fixes, post_issues
 
 logger = logging.getLogger(__name__)
@@ -91,8 +92,24 @@ class LinkedInPostGenerator(BaseContentGenerator):
             hashtags = [tag.strip() for tag in hashtags.split() if tag.strip()]
 
         all_hashtags = self._merge_hashtags(list(hashtags), pillar)
-        image_prompt = payload.get("image_prompt") or pillar.image_prompt or pillar.angle
-        video_prompt = payload.get("video_prompt") or f"Slow-motion footage showing {pillar.angle.lower()} in operation"
+        # Media has to show what the post is actually about (2026-09-13). TNT
+        # took the model's prompt raw, with the pillar's fixed prompt as fallback
+        # and no guardrail either way - so nothing stopped a stock skyline, and
+        # nothing tied the picture to the post. Same composer Seta uses: the model
+        # supplies the subject, the pillar supplies the house look, and the
+        # mandate (real people at work, no text, no logos, no skyline) is appended
+        # in code where no model output can drop it.
+        image_prompt = compose_media_prompt(
+            subject=payload.get("image_prompt"),
+            house_prompt=pillar.image_prompt or pillar.angle,
+            kind="image",
+        )
+        video_prompt = compose_media_prompt(
+            subject=payload.get("video_prompt") or payload.get("image_prompt"),
+            house_prompt=pillar.video_prompt
+                         or f"Slow-motion footage showing {pillar.angle.lower()} in operation",
+            kind="video",
+        )
         alt_text = payload.get("alt_text") or f"Industrial bearings solution for {pillar.target_client}"
 
         metadata: Dict[str, str] = {
@@ -293,6 +310,10 @@ class LinkedInPostGenerator(BaseContentGenerator):
             "- Finish with 3-5 hashtags chosen from this pool and/or relevant variants: "
             f"{hashtag_pool}.\n"
             f"- Propose an image_prompt describing {image_hint} with cinematic industrial detail.\n"
+            "- image_prompt and video_prompt must show the SUBJECT OF THIS POST - the actual "
+            "component, machine or failure you wrote about, and the people working on it - not "
+            "generic industrial imagery. Both are required and must describe the same scene: "
+            "image_prompt as a still, video_prompt as that scene in motion.\n"
             f"{image_requirements}\n"
             f"- Also provide video_prompt describing {video_prompt_override}\n"
             "- Provide alt_text suitable for LinkedIn accessibility, 15-25 words.\n"

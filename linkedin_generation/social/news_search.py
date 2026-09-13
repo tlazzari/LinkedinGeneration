@@ -142,7 +142,57 @@ DEMOTED_SOURCES = [
     "sohu.com", "163.com", "baijiahao", "toutiao", "ifeng.com",
     "einpresswire.com", "prnewswire", "businesswire", "globenewswire",
     "openpr.com", "accesswire", "medium.com", "linkedin.com", "reddit.com",
+    # Market-research report mills. Checking "bearing manufacturer industry" on
+    # 2026-09-13 returned "Cold Heading Quality Wire Market Share Analysis",
+    # "Wind Power Bearing Market Overview" and "Tool Holder Market Size, Share,
+    # Trends & Growth Forecast 2035" in the top five. These are SEO teasers for
+    # paid reports, not journalism: there is no event in them, so a post built on
+    # one has nothing to say. They crowd out the genuine trade press, which does
+    # exist even for narrow topics - the same check surfaced MTDCNC on collets.
+    "grandviewresearch", "marketresearchfuture", "marketgrowthreports",
+    "marketsandmarkets", "researchandmarkets", "fortunebusinessinsights",
+    "precedenceresearch", "imarcgroup", "mordorintelligence", "alliedmarketresearch",
+    "verifiedmarket", "skyquestt", "zionmarketresearch", "futuremarketinsights",
+    "coherentmarketinsights", "transparencymarketresearch", "openpr",
 ]
+
+# The genre is recognisable from the headline alone, whatever domain it is on.
+_REPORT_MILL_RE = re.compile(
+    r"market\s+(size|share|overview|outlook|report|analysis)"
+    r"|(size|share)[^.]{0,40}(forecast|cagr)"
+    r"|forecast\s+(to\s+)?20\d\d"
+    r"|industry\s+report\b",
+    re.IGNORECASE,
+)
+
+# Trade press that DOES cover narrow engineering topics, ranked with the wires.
+# Added because the collet check found MTDCNC carrying a real product story while
+# mainstream Google News had nothing at all for the same query.
+PREFERRED_TRADE = [
+    "mtdcnc.com", "modernmachineshop.com", "americanmachinist.com",
+    "themanufacturer.com", "industryweek.com", "canadianmetalworking.com",
+    "machinery.co.uk", "aerospacemanufacturinganddesign.com", "etmm-online.com",
+    "manufacturingtodayindia.com", "engineering.com", "machinedesign.com",
+    "powertransmission.com", "evolution.skf.com", "bearing-news.com",
+]
+
+# Outright junk — dropped, not demoted. Chinese "news" results for manufacturing
+# terms are salted with gambling and betting sites keyword-stuffing the industry
+# vocabulary: a probe for 机床 行业 市场 on 2026-09-13 returned "果博APP怎么样产业化
+# 成果发布" and "库博体育怎么让制造业效益可见" in the top ten. Ranking them last is
+# not enough, because on a thin topic last still means published.
+SPAM_MARKERS = [
+    "果博", "库博", "太阳城", "威尼斯人", "百家乐", "娱乐城", "博彩", "彩票",
+    "开户", "赌场", "下注", "投注", "澳门银河", "新葡京",
+    "casino", "betting", "gambling", "포커", "바카라",
+]
+
+
+def is_spam(title: str, url: str = "") -> bool:
+    """True for SEO junk dressed as industry news."""
+    blob = f"{title} {url}".lower()
+    return any(m.lower() in blob for m in SPAM_MARKERS)
+
 
 # Preferred news sources (not restricted, just prioritized)
 PREFERRED_SOURCES = [
@@ -609,15 +659,19 @@ def _rank_key(result: dict):
     """Chinese preferred outlets, then Western preferred, then the rest, then wires."""
     url = (result.get("url") or "").lower()
     age = result.get("age_days") if result.get("age_days") is not None else 999
-    if any(src in url for src in DEMOTED_SOURCES):
-        return (3, 0, age)
+    title = result.get("title") or ""
+    if any(src in url for src in DEMOTED_SOURCES) or _REPORT_MILL_RE.search(title):
+        return (4, 0, age)
+    for i, src in enumerate(PREFERRED_TRADE):
+        if src in url:
+            return (1, len(PREFERRED_SOURCES) + i, age)
     for i, src in enumerate(PREFERRED_SOURCES_ZH):
         if src in url:
             return (0, i, age)
     for i, src in enumerate(PREFERRED_SOURCES):
         if src in url:
             return (1, i, age)
-    return (2, 0, age)
+    return (3, 0, age)
 
 
 def search_news_for_pillar(
@@ -661,6 +715,9 @@ def search_news_for_pillar(
             url = r.get("url", "")
             title = (r.get("title") or "").strip().lower()
             if not url or url in seen_urls or (title and title in seen_titles):
+                continue
+            if is_spam(r.get("title", ""), url):
+                logger.info("Dropping SEO spam result: %s", (r.get("title") or "")[:60])
                 continue
             age = r.get("age_days")
             if age is not None and age > MAX_ARTICLE_AGE_DAYS:
@@ -720,6 +777,24 @@ def search_news_for_pillar(
         len(articles), pillar_name, sum(1 for a in articles if a.language == "zh"),
     )
     return articles
+
+
+def providers_reachable() -> bool:
+    """Is the news plumbing working AT ALL, regardless of any one topic?
+
+    Needed to tell two very different situations apart (2026-09-13). A pillar
+    that returns nothing might mean the providers are broken - the three-week
+    outage - or it might simply mean nobody wrote about that subject this week.
+    A live probe on 2026-09-13 found "collet chuck tooling" and "刀柄 夹头 加工"
+    return ZERO results in any language, while "bearing manufacturer industry"
+    returns 18: some product niches genuinely have no press. Raising NEWS_OUTAGE
+    for a narrow topic would cry wolf until the alarm was ignored, which is
+    exactly how the real outage survived three weeks.
+    """
+    try:
+        return bool(search_news_serpapi("manufacturing industry", 3, lang="en"))
+    except Exception:
+        return False
 
 
 def provider_health(timeout_query: str = "中国 企业 收购 欧洲") -> dict:
@@ -790,6 +865,9 @@ __all__ = [
     "resolve_publisher_url",
     "parse_relative_age",
     "provider_health",
+    "providers_reachable",
+    "is_spam",
+    "SPAM_MARKERS",
     "build_news_context",
     "fetch_article_preview_image",
     "PILLAR_SEARCH_QUERIES",
@@ -797,5 +875,6 @@ __all__ = [
     "_is_chinese",
     "PREFERRED_SOURCES_ZH",
     "DEMOTED_SOURCES",
+    "PREFERRED_TRADE",
     "MAX_ARTICLE_AGE_DAYS",
 ]

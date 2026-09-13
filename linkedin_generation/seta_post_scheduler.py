@@ -506,17 +506,35 @@ def run_single_generation(
             f"{a.source}: {a.url}" for a in post.news_articles if a.url
         )
     elif pillar.use_news_search and post_type != "holiday":
-        # LOUD, and greppable. Between 2026-08-20 and 2026-09-13 every news pillar
-        # ran with zero articles and published anyway: the post still went out, the
-        # cron sentinel was still touched and the health check still passed, so
-        # three weeks of generic posts looked exactly like success from outside.
-        # The suite now fails if this token appears in a recent log.
-        extra_metadata["news_outage"] = "true"
-        logging.error(
-            "NEWS_OUTAGE: pillar '%s' requires news but every provider returned "
-            "nothing - this post is generic filler, check SERP_API_KEY and "
-            "GOOGLE_API_KEY", pillar.name,
-        )
+        # Nothing came back. That is either the plumbing being broken - the
+        # 2026-08-20 outage, when EVERY pillar returned zero for three weeks while
+        # the cron, the sentinel and the health check all stayed green - or simply
+        # a subject nobody wrote about this week. A live probe on 2026-09-13 found
+        # "collet chuck tooling" and "刀柄 夹头 加工" return zero in ANY language
+        # while "bearing manufacturer industry" returns 18: some product niches
+        # genuinely have no press.
+        #
+        # Telling them apart matters. Raising NEWS_OUTAGE for a narrow topic would
+        # cry wolf every week until the alarm was ignored, which is precisely how
+        # the real outage survived three weeks.
+        from linkedin_generation.social.news_search import providers_reachable
+        if providers_reachable():
+            extra_metadata["news_outage"] = "topic"
+            logging.warning(
+                "NEWS_THIN: no recent news for pillar '%s' - the providers are "
+                "working, so this subject simply has no press this week. The post "
+                "is built on the company's own material instead. If it stays empty "
+                "week after week, the search phrases are too narrow: widen them "
+                "from the product to its industry.", pillar.name,
+            )
+        else:
+            extra_metadata["news_outage"] = "true"
+            logging.error(
+                "NEWS_OUTAGE: pillar '%s' requires news and the providers "
+                "themselves are returning nothing for ANY query - this post is "
+                "generic filler. Check SERP_API_KEY and GOOGLE_API_KEY.",
+                pillar.name,
+            )
 
     # EMAIL DELIVERY (2026-09-13). Not every company will hand over an
     # organisation URN and a w_organization_social token - some cannot, because

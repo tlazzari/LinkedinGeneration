@@ -1144,4 +1144,87 @@ if _sys_test.exists():
     t.check('RULE: the removal is explained where the next person will look',
             'REMOVED 2026-09-13' in _st)
 
+# ============================================================================
+# NEWS QUALITY FOR NARROW INDUSTRIAL TOPICS (2026-09-13)
+# ============================================================================
+# Prompted by a fair doubt: "I'm not sure that news about bearings or collets or
+# toolholders actually exists". Probing it turned the question into a different
+# one. News DOES exist, but the first page of it is dominated by two genres that
+# are worthless as the anchor of a post, and by outright spam:
+#   - market-research report mills ("Tool Holder Market Size, Share, Trends &
+#     Growth Forecast 2035") - SEO teasers for paid reports, with no event in them
+#   - Chinese gambling sites keyword-stuffing manufacturing vocabulary
+# Filtering both surfaced the real thing: Modern Machine Shop on a Haimer hybrid
+# chuck for collets, and Luoyang LYC's 665M CNY placement for bearings.
+from linkedin_generation.social.news_search import (
+    is_spam, SPAM_MARKERS, PREFERRED_TRADE, providers_reachable,
+)
+
+t.check('news: gambling SEO dressed as manufacturing news is DROPPED',
+        is_spam('果博APP怎么样产业化成果发布，开启高端制造新纪元')
+        and is_spam('库博体育怎么让制造业效益可见'))
+t.check('news: real Chinese industry news is not mistaken for spam',
+        not is_spam('五洲新春：全年营收降幅有望收窄 机器人零部件多款产品处小批量交付阶段')
+        and not is_spam('Bearing failures: When normal readings hide the risk'))
+t.check('news: the spam list is declared, not buried in the matcher',
+        '果博' in SPAM_MARKERS and 'casino' in SPAM_MARKERS)
+
+_mill = {'url': 'https://www.marketresearchfuture.com/x', 'age_days': 1,
+         'title': 'Tool Holder Market Size, Share, Trends & Growth Forecast 2035'}
+_mill_other_domain = {'url': 'https://example.com/x', 'age_days': 1,
+                      'title': 'Wind Power Bearing Market Overview'}
+_trade = {'url': 'https://www.modernmachineshop.com/y', 'age_days': 3,
+          'title': 'Haimer Hybrid Chuck Reduces Vibration in Precision Machining'}
+_wire = {'url': 'https://www.reuters.com/z', 'age_days': 2, 'title': 'Something happened'}
+
+t.check('news: a report mill ranks below genuine trade press',
+        _rank_key(_mill) > _rank_key(_trade))
+t.check('news: the report-mill genre is caught by its HEADLINE, not just its domain',
+        _rank_key(_mill_other_domain) > _rank_key(_trade))
+t.check('news: trade press ranks with the wires, not below everything else',
+        _rank_key(_trade) < _rank_key({'url': 'https://random.example/a', 'age_days': 0,
+                                       'title': 'Some item'}))
+t.check('news: the wires still outrank trade press', _rank_key(_wire) < _rank_key(_trade))
+t.check('news: engineering trade outlets are declared',
+        'modernmachineshop.com' in PREFERRED_TRADE and 'mtdcnc.com' in PREFERRED_TRADE)
+
+# --- a thin topic is NOT an outage ---
+# "collet chuck tooling" returns zero from mainstream news while
+# "bearing manufacturer industry" returns 18. Raising NEWS_OUTAGE for a narrow
+# subject would cry wolf every week until the alarm was ignored - which is
+# exactly how the real three-week outage survived.
+t.check('RULE: a thin topic and a broken provider are told apart',
+        'NEWS_THIN' in sched_src and 'providers_reachable' in sched_src)
+# NB: match a fragment that lives on ONE source line - the message is split
+# across a concatenation, so the whole sentence never appears contiguously.
+t.check('RULE: NEWS_OUTAGE is only raised when the providers answer nothing at all',
+        'returning nothing for ANY query' in sched_src)
+t.check('RULE: a thin topic tells the owner how to fix it',
+        'widen them' in sched_src)
+
+# --- TNT media must match its post too ---
+_tnt_src = (PKG_DIR / 'social' / 'content_generation.py').read_text()
+t.check('RULE: TNT composes media from the post subject, like Seta',
+        'compose_media_prompt(' in _tnt_src)
+t.check('RULE: TNT media carries the mandate appended in code',
+        'house_prompt=pillar.image_prompt' in _tnt_src)
+t.check('RULE: TNT is told the media must show THIS post, not generic industry shots',
+        'SUBJECT OF THIS POST' in _tnt_src)
+t.check('RULE: a missing TNT video_prompt reuses the image subject',
+        'payload.get("video_prompt") or payload.get("image_prompt")' in _tnt_src)
+
+# --- the tenant can see, before saving, whether its subject has any press ---
+_soc_lib_p = _P('/var/www/tntbearings.com/social-standalone/lib.php')
+if _soc_lib_p.exists():
+    _sl = _soc_lib_p.read_text()
+    _se = _P('/var/www/tntbearings.com/social-standalone/edit.php').read_text()
+    t.check('RULE: the page can run a subject\'s search phrases for real',
+            'function social_check_queries' in _sl)
+    t.check('RULE: the page offers that check before anything is saved',
+            "value=\"check\"" in _se)
+    t.check('RULE: an empty result explains that the subject is too specific',
+            'the subject is too ' in _se and 'specific' in _se)
+    t.check('RULE: suggestions aim at a level where trade press publishes',
+            'collet chuck tooling' in _sl and 'INDUSTRY or the MARKET' in _sl)
+
 sys.exit(t.summary())
