@@ -1352,8 +1352,11 @@ _ctx = build_experience_context()
 t.check('EXPERIENCE: the prompt block itself is publishable', is_publishable(_ctx))
 t.check('EXPERIENCE: it tells the model to name nobody, first and absolutely',
         'NAME NOBODY' in _ctx)
-t.check('EXPERIENCE: missing data is not rendered as zero',
-        'genuinely not recorded' in _ctx)
+# Superseded 2026-09-13 by something stronger: counts are not rendered AT ALL
+# now, so an unpopulated one cannot appear as "0 closed" in the first place.
+t.check('EXPERIENCE: no outcome tally is rendered, zero or otherwise',
+        'closed' not in _ctx.split('NEVER STATE')[0]
+        and 'stalled' not in _ctx.split('NEVER STATE')[0])
 t.check('EXPERIENCE: it is wired into the Seta prompt',
         'experience_context' in gen_src)
 
@@ -1469,5 +1472,45 @@ if _tl:
             not _tl.get('use_news_search'))
 t.check('TL: the experience block says it is the anchor when no news appears',
         "THIS IS THE POST'S ANCHOR" in build_experience_context())
+
+# ── NEVER COUNT YOUR OWN MANDATES (2026-09-13) ─────────────────────────────
+# A generated post said "5 sell-side deals in automotive and 5 in robotics" -
+# true, drawn from the record, and a bad idea. Tom: "numbering the mandates of
+# Seta Capital does not sound like a good idea because not always flattering the
+# relative small number." A boutique's strength is what it has SEEN; a count
+# invites a comparison with a bulge bracket that nobody wins. The published
+# aggregates (10+ transactions, EUR 150M+) are the deliberate exception.
+from linkedin_generation.social.post_quality import self_deal_counts, PUBLISHED_AGGREGATES
+
+t.check('COUNT: the exact phrasing from the real post is caught',
+        self_deal_counts('The firm mandates show 5 sell-side deals in automotive.')
+        == ['5 sell-side deals'])
+t.check('COUNT: a plain tally is caught', self_deal_counts('We completed 7 mandates.'))
+t.check('COUNT: qualitative experience is the intended output',
+        not self_deal_counts('Across the industrial mandates we have run, the pattern repeats.'))
+t.check('COUNT: the published aggregates are allowed',
+        not self_deal_counts('10+ closed transactions and EUR 150M+ in aggregate value.')
+        and '10' in PUBLISHED_AGGREGATES)
+t.check('COUNT: a year is a date, not a tally',
+        not self_deal_counts('We have run mandates since 2014 across Europe.'))
+t.check('COUNT: market figures are untouched',
+        not self_deal_counts('Japan machine tool orders rose 65% in August.'))
+t.check('COUNT: TNT is unaffected - it counts products, not deals',
+        not [i for i in post_issues({'headline': 'H', 'body': 'We stock 7 bearing types.',
+                                     'cta': 'Call us. And you?'}, TNT_VOICE)
+             if 'deal record' in i])
+t.check('COUNT: the gate reports it for Seta',
+        any('deal record' in i for i in post_issues(
+            {'headline': 'H', 'body': 'We have completed 7 mandates in robotics.',
+             'cta': 'And you?'}, SETA_VOICE)))
+
+# The counts must not even reach the prompt - they are for choosing the subject.
+_exp_ctx = build_experience_context()
+_sector_block = _exp_ctx.split('NEVER STATE')[0]
+t.check('COUNT: no mandate tally reaches the prompt at all',
+        not re.search(r'\b\d{1,3}\s+mandates', _sector_block))
+t.check('COUNT: year spans DO reach it - twelve years of history is the good number',
+        re.search(r'\b20\d\d\b', _sector_block))
+t.check('COUNT: the prompt says never to state how many', 'NEVER STATE HOW MANY' in _exp_ctx)
 
 sys.exit(t.summary())

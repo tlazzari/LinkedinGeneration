@@ -101,30 +101,37 @@ def build_experience_context(pattern: Optional[Dict[str, object]] = None) -> str
         "These are aggregates from twelve years of live mandates:",
         "",
     ]
+    # COUNTS ARE FOR CHOOSING THE SUBJECT, NOT FOR PUBLICATION (2026-09-13).
+    # A generated post said "5 sell-side deals in automotive (2017-2025) and 5 in
+    # robotics" - true, drawn from the record, and a bad idea. Tom: "numbering the
+    # mandates of Seta Capital does not sound like a good idea because not always
+    # flattering the relative small number." A boutique's strength is what it has
+    # SEEN, not how many times. The counts still decide which sectors are worth
+    # writing about; they just never leave this function.
     for p in patterns[:3]:
         span = (f"{p['from_year']}-{p['to_year']}"
-                if p["from_year"] and p["to_year"] else "recent years")
-        bits = [f"{p['deals']} mandates {span}"]
+                if p["from_year"] and p["to_year"] and p["from_year"] != p["to_year"]
+                else "")
+        bits = ["mandates run" + (f" between {span}" if span else "")]
         if p["countries"] > 1:
-            bits.append(f"across {p['countries']} countries")
-        # Only state a breakdown that is actually populated. `status` and `side`
-        # are 'unknown' on most rows, so printing them unconditionally produced
-        # "0 closed, 0 stalled, 0 died" - which reads as a firm that closes
-        # nothing. An absent number must stay absent, not be rendered as zero.
-        sides = p["buyside"] + p["sellside"]
-        if sides >= max(2, p["deals"] // 2):
-            bits.append(f"{p['buyside']} buy-side and {p['sellside']} sell-side")
-        outcomes = p["closed"] + p["stalled"] + p["dead"]
-        if outcomes >= max(2, p["deals"] // 2):
-            bits.append(
-                f"of which {p['closed']} closed, {p['stalled']} stalled and "
-                f"{p['dead']} did not complete"
-            )
+            bits.append("in more than one country")
+        # Direction as a tendency, never as a tally.
+        if p["sellside"] > p["buyside"] * 2:
+            bits.append("mostly sell-side")
+        elif p["buyside"] > p["sellside"] * 2:
+            bits.append("mostly buy-side")
         lines.append(f"- {p['sector']}: " + ", ".join(bits) + ".")
     lines += [
         "",
-        "Where a breakdown is missing above it is genuinely not recorded - do not "
-        "guess at it and do not imply a completion rate the record does not show.",
+        "NEVER STATE HOW MANY. Do not write a number of mandates, deals or "
+        "transactions - not per sector, not per year, not in total. The firm is a "
+        "boutique and a count invites the reader to weigh it against a bulge "
+        "bracket, which is the wrong comparison and not the point. Write what the "
+        "record SHOWS: 'across the industrial mandates we have run', 'this comes "
+        "up in almost every family-owned sale we see', 'we have watched this "
+        "happen since 2014'. The only figures that may be published are the ones "
+        "already on the firm's own materials: 10+ closed transactions and EUR "
+        "150M+ in aggregate value.",
         "",
         "HOW TO USE IT — and the first rule is absolute:",
         "1. NAME NOBODY. No company, no person, no deal. Not once, not as an "

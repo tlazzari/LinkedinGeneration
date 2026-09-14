@@ -356,6 +356,40 @@ def unattributed_official_framing(text: str) -> List[str]:
     return sorted(set(hits))
 
 
+# COUNTING YOUR OWN MANDATES (2026-09-13). A generated post said "5 sell-side
+# deals in automotive and 5 in robotics" - true, from the record, and a bad idea.
+# The owner's instruction: numbering the firm's own mandates is not a good idea,
+# because the number is not always flattering. A boutique's strength
+# is what it has SEEN, not how many times; a count invites a comparison with a
+# bulge bracket that nobody wins.
+#
+# The exception is the aggregates the firm already publishes on its own
+# materials - "10+ closed transactions", "EUR 150M+" - which are deliberate.
+_OWN_DEAL_NOUNS = r"(?:mandates?|deals?|transactions?|processes|sales?|acquisitions?|exits?)"
+# [\w-]+ not \w+: the first version missed "5 sell-side deals" because a hyphen
+# is not a word character, which is precisely how the real post phrased it.
+_SELF_COUNT_RE = re.compile(
+    r"(?<!\w)(\d{1,3})\s+(?:[\w-]+\s+){0,3}?" + _OWN_DEAL_NOUNS
+    + r"|" + _OWN_DEAL_NOUNS + r"\s*[:\-]?\s*(\d{1,3})(?!\w)",
+    re.IGNORECASE,
+)
+PUBLISHED_AGGREGATES = {"10", "150"}
+
+
+def self_deal_counts(text: str) -> List[str]:
+    """Numbers the post puts on the firm's own deal record."""
+    hits: List[str] = []
+    for m in _SELF_COUNT_RE.finditer(text):
+        value = m.group(1) or m.group(2)
+        if not value or value in PUBLISHED_AGGREGATES:
+            continue
+        # A year is a date, not a tally.
+        if len(value) == 4 and value.startswith(("19", "20")):
+            continue
+        hits.append(m.group(0).strip())
+    return sorted(set(hits))
+
+
 # Vague attributions that imply a source the pipeline never fetched.
 VAGUE_SOURCE_PATTERNS = [
     r"\brecent (?:reports?|data|studies|analysis)\b",
@@ -603,6 +637,20 @@ def post_issues(
                 f"{voice.max_filler_per_100_words}) — replace "
                 + ", ".join(f"'{term}' x{count}" for term, count in worst)
                 + " with concrete nouns, names and specifics"
+            )
+
+    if voice.brand_in_closing_only and not is_holiday:
+        # Applies to any voice written to be reshared personally, whose posts
+        # draw on the firm's own mandate record. A sales voice counts products,
+        # not deals, so this does not bite there.
+        counted = self_deal_counts(whole)
+        if counted:
+            issues.append(
+                "puts a number on the firm's own deal record - "
+                + ", ".join(f"'{c}'" for c in counted)
+                + ". Say what the record SHOWS, not how many times: 'across the "
+                "industrial mandates we have run'. Only the published aggregates "
+                "(10+ transactions, EUR 150M+) may carry a figure"
             )
 
     if not is_holiday:
