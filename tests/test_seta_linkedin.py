@@ -1597,4 +1597,70 @@ t.check('DRY: promo is DROPPED at selection, not merely demoted',
 t.check('DRY: plural "analyses" is caught like the singular',
         vague_source_hits('Recent analyses from early 2026 show a clear shift.'))
 
+# ============================================================================
+# WHAT THE TENANTS INHERITED BY SHARING SETA'S GENERATOR (2026-09-14)
+# ============================================================================
+# Bolla tenants use SetaLinkedInPostGenerator because it carries the three house
+# rules. That also means anything the generator loads reaches THEM. Two things
+# loaded there belong to Seta alone, and both were unguarded:
+#
+#   1. build_experience_context() - Seta's twelve-year mandate record was injected
+#      into a tenant's prompt and labelled "the post's anchor". A furniture maker
+#      would have been writing from one client's confidential deal history.
+#   2. confidentiality_issues() - Seta's counterparty list was run over a tenant's
+#      post, blocking names that mean nothing to them (their own customer may sit
+#      in Seta's address book) while protecting none of their own parties.
+_gsrc = (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
+
+t.check('TENANT: Seta\'s deal record is only loaded for Seta',
+        'if self.brand_key == "seta" and post_type != "holiday"' in _gsrc)
+t.check('TENANT: Seta\'s counterparty list is only applied to Seta',
+        'if self.brand_key == "seta" else []' in _gsrc)
+t.check('TENANT: the reason is recorded where the next person will look',
+        "SETA'S RECORD IS SETA'S" in _gsrc)
+
+# A tenant has no real record and no confidentiality gate of its own, so it must
+# not invent customer case studies at all.
+_bs_src = (PKG_DIR / 'social' / 'brand_store.py').read_text()
+t.check('TENANT: invented case studies are banned for tenants by default',
+        'ban_invented_cases=bool(config.get("ban_invented_cases", True))' in _bs_src)
+t.check('TENANT: Seta itself keeps the exemption it needs',
+        not SETA_VOICE.ban_invented_cases)
+t.check('TENANT: a tenant can declare its own competitors',
+        'competitors=tuple(' in _bs_src)
+
+_soc_lib3 = _P('/var/www/tntbearings.com/social-standalone/lib.php')
+if _soc_lib3.exists():
+    _l3 = _soc_lib3.read_text()
+    _e3 = _P('/var/www/tntbearings.com/social-standalone/edit.php').read_text()
+    t.check('TENANT: the CRM stores a competitor list', "'competitors' => []" in _l3)
+    t.check('TENANT: the page asks for it', 'name="competitors"' in _e3)
+    t.check('TENANT: it explains why, not just what',
+            'should not be advertising them' in _e3)
+
+# End to end on a throwaway tenant.
+import json as _j2, tempfile as _t2, shutil as _s2
+from pathlib import Path as _P2
+_od = _bs.BRAND_DIR
+_td = _P2(_t2.mkdtemp())
+try:
+    _bs.BRAND_DIR = _td
+    (_td / 't6666_leak.json').write_text(_j2.dumps({
+        'key': 't6666_leak', 'display_name': 'Leak Probe Srl', 'template': 'tnt',
+        'tone': 'promotional', 'enabled': True, 'competitors': ['Rival Outdoor Srl'],
+        'pillars': [{'name': 'X', 'angle': 'y', 'news_queries': ['q'],
+                     'use_news_search': False}]}))
+    _bs.apply_configs()
+    _tb = BRANDS['t6666_leak']
+    t.check('TENANT: its own competitor list reaches the gate',
+            'Rival Outdoor Srl' in _tb.voice.competitors)
+    t.check('TENANT: invented cases are banned for it', _tb.voice.ban_invented_cases)
+    t.check('TENANT: it does not inherit Seta\'s competitor list',
+            'SKF' not in _tb.voice.competitors)
+finally:
+    _bs.BRAND_DIR = _od
+    _s2.rmtree(_td, ignore_errors=True)
+    BRANDS.pop('t6666_leak', None)
+    _bs.apply_configs()
+
 sys.exit(t.summary())

@@ -123,6 +123,15 @@ def voice_from_config(config: dict, fallback: Optional[BrandVoice] = None) -> Br
         name=name or "Company",
         overused_headline_terms=terms,
         max_filler_per_100_words=max_filler,
+        # ON for every tenant (2026-09-14). Seta is the one brand that may
+        # describe parties by what they are, because its descriptions come from a
+        # real mandate record and are policed by the confidentiality gate. A
+        # tenant has neither, so an invented "a client in Saudi Arabia" is pure
+        # fabrication published as a customer reference.
+        ban_invented_cases=bool(config.get("ban_invented_cases", True)),
+        competitors=tuple(
+            str(c).strip() for c in (config.get("competitors") or []) if str(c).strip()
+        ),
         **switches,
     )
 

@@ -70,7 +70,16 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         # none is loaded (see seta_experience). Twelve years of live mandates is
         # the thing a competitor cannot copy, and it is what makes a post worth
         # reading when there is no news worth building on.
-        experience_context = "" if post_type == "holiday" else build_experience_context()
+        # SETA'S RECORD IS SETA'S (2026-09-14). Bolla tenants share this generator
+        # because it carries the three house rules, which means anything loaded
+        # here reaches THEM too. Unguarded, a furniture maker's prompt was handed
+        # Seta's twelve-year mandate record and told it was the post's anchor -
+        # one client's confidential deal history as raw material for another's
+        # marketing. Gated on the brand that owns the record.
+        experience_context = (
+            build_experience_context()
+            if self.brand_key == "seta" and post_type != "holiday" else ""
+        )
 
         raw = self.llm_client.complete(
             self._build_prompt(
@@ -140,10 +149,15 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         public_context = "\n".join(
             [news_context] + [f"{a.title} {a.summary} {a.source}" for a in news_articles]
         )
+        # Same reasoning: the counterparty list is SETA's mailbox. Running it over
+        # a tenant's post blocks names that mean nothing to them (their own
+        # customer may sit in Seta's address book) while protecting none of their
+        # own parties. Tenants need their own list before this can apply to them -
+        # until then it is off for them rather than wrong for them.
         conf = confidentiality_issues(
             " ".join(str(payload.get(k, "")) for k in ("headline", "body", "cta")),
             public_context=public_context,
-        )
+        ) if self.brand_key == "seta" else []
         if conf:
             logger.error("CONFIDENTIALITY: %s - regenerating once", "; ".join(conf))
             safe_raw = self.llm_client.complete(
