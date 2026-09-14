@@ -303,6 +303,59 @@ TNT_VOICE = BrandVoice(
 
 VOICES = {"seta": SETA_VOICE, "tnt": TNT_VOICE}
 
+# STATE TALKING POINTS (2026-09-13). Searching Chinese sources first is right -
+# they carry Europe-China deal flow the Western wires never run - but several of
+# the highest-ranked outlets are state or party organs, and their FRAMING is
+# policy. A generated post had already adopted "pan-securitisation erodes market
+# logic" as its own analysis; that is an official formulation, not a finding.
+#
+# These are not banned words. They are words that must be ATTRIBUTED - "Yicai
+# reported that the chamber's president described..." - never asserted in the
+# firm's own voice. A Europe-China advisory publishing Beijing's line unattributed
+# damages it with exactly the European owners it is trying to reach.
+OFFICIAL_FRAMING = [
+    r"pan[- ]securitis?z?ation", r"泛安全化",
+    r"win[- ]win", r"合作共赢", r"互利共赢",
+    r"cold war mentality", r"冷战思维",
+    r"hegemon\w*", r"霸权",
+    r"containment of china", r"遏制中国",
+    r"long[- ]arm jurisdiction", r"长臂管辖",
+    r"unilateralis\w+", r"单边主义",
+    r"decoupling (?:harms|hurts)", r"脱钩断链",
+    r"protectionis\w+ (?:by|of) (?:the )?(?:eu|europe|brussels|washington)",
+    r"de[- ]risking is (?:really )?protectionism",
+    r"market logic (?:is )?(?:erod\w+|undermin\w+)",
+    r"weaponis?z?ing (?:trade|interdependence)",
+]
+
+# Words that mark a claim as someone else's rather than the post's own.
+_ATTRIBUTION_RE = re.compile(
+    r"\b(reported|report|said|says|according to|noted|argued|described|"
+    r"told|claims?|stated|wrote|quoted|per\s+\w+|in its view|"
+    r"官方|表示|称)\b",
+    re.IGNORECASE,
+)
+
+
+def unattributed_official_framing(text: str) -> List[str]:
+    """Official talking points the post states as its own analysis.
+
+    Attribution is checked in the SAME sentence and the one before it, which is
+    where a reader looks to see whose claim it is.
+    """
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    hits: List[str] = []
+    for i, sentence in enumerate(sentences):
+        for pattern in OFFICIAL_FRAMING:
+            m = re.search(pattern, sentence, re.IGNORECASE)
+            if not m:
+                continue
+            window = sentence + " " + (sentences[i - 1] if i else "")
+            if not _ATTRIBUTION_RE.search(window):
+                hits.append(m.group(0))
+    return sorted(set(hits))
+
+
 # Vague attributions that imply a source the pipeline never fetched.
 VAGUE_SOURCE_PATTERNS = [
     r"\brecent (?:reports?|data|studies|analysis)\b",
@@ -550,6 +603,16 @@ def post_issues(
                 f"{voice.max_filler_per_100_words}) — replace "
                 + ", ".join(f"'{term}' x{count}" for term, count in worst)
                 + " with concrete nouns, names and specifics"
+            )
+
+    if not is_holiday:
+        framing = unattributed_official_framing(whole)
+        if framing:
+            issues.append(
+                "states a government talking point as your own analysis - "
+                + ", ".join(f"'{f}'" for f in framing)
+                + ". Attribute it to the outlet that said it and give the other "
+                "side, or drop it"
             )
 
     if voice.competitors and not is_holiday:

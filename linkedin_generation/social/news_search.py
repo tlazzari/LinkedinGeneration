@@ -194,6 +194,52 @@ def is_spam(title: str, url: str = "") -> bool:
     return any(m.lower() in blob for m in SPAM_MARKERS)
 
 
+# STATE OR PARTY-AFFILIATED OUTLETS (2026-09-13). Not banned - they carry real
+# deal and industrial news the Western wires never run, which is why the Chinese
+# search earns its place. But their FRAMING is official policy, and a post that
+# repeats it unattributed is a European M&A advisory publishing Beijing's line
+# under its own name.
+#
+# This list was written after noticing that the top-ranked Chinese source here
+# was cnfin.com - 新华财经, Xinhua - and that a generated post had adopted
+# "pan-securitisation erodes market logic" as its own analysis. That is a
+# official formulation, not a finding.
+#
+# The rule is ATTRIBUTE, DON'T ASSERT. Independent and foreign outlets outrank
+# these so they are the anchor when both are available.
+STATE_AFFILIATED = {
+    "cnfin.com": "Xinhua Finance (state news agency)",
+    "xinhuanet.com": "Xinhua (state news agency)",
+    "people.com.cn": "People's Daily (Communist Party organ)",
+    "ifnews.com": "International Finance News (People's Daily group)",
+    "gmw.cn": "Guangming Daily (Communist Party organ)",
+    "chinanews.com": "China News Service (state-run)",
+    "chinanews.com.cn": "China News Service (state-run)",
+    "cctv.com": "CCTV (state broadcaster)",
+    "globaltimes.cn": "Global Times (Communist Party group)",
+    "chinadaily.com.cn": "China Daily (state)",
+    "ce.cn": "Economic Daily (state)",
+    "stcn.com": "Securities Times (People's Daily group)",
+    "21jingji.com": "21st Century Business Herald (Nanfang, party group)",
+    "yicai.com": "Yicai (Shanghai state-owned media group)",
+    "cs.com.cn": "China Securities Journal (Xinhua group)",
+    "sc.chinanews.com.cn": "China News Service (state-run)",
+    # Non-Chinese state outlets, same rule
+    "rt.com": "RT (Russian state)",
+    "sputniknews": "Sputnik (Russian state)",
+    "presstv": "Press TV (Iranian state)",
+}
+
+
+def state_affiliation(url: str) -> Optional[str]:
+    """How an outlet should be labelled, or None if it is independent."""
+    u = (url or "").lower()
+    for domain, label in STATE_AFFILIATED.items():
+        if domain in u:
+            return label
+    return None
+
+
 # Preferred news sources (not restricted, just prioritized)
 PREFERRED_SOURCES = [
     "bloomberg.com",
@@ -221,6 +267,9 @@ class NewsArticle:
     preview_image_url: Optional[str] = None
     language: str = "en"
     age_days: Optional[int] = None
+    # Set from the URL, not guessed by the model: an outlet's ownership is a
+    # fact about the source, and the post must attribute rather than assert.
+    state_label: Optional[str] = None
 
     def to_context_string(self) -> str:
         """Format article for LLM context.
@@ -231,9 +280,13 @@ class NewsArticle:
         """
         date_str = f", {self.published_date}" if self.published_date else ""
         lang = " [Chinese-language source]" if self.language == "zh" else ""
+        state = (f"\n  ⚠ OWNERSHIP: {self.state_label}. Its FRAMING is official "
+                 f"policy, not a neutral finding - attribute anything it asserts "
+                 f"to the outlet and give the other side of it."
+                 if self.state_label else "")
         return (
             f"- HEADLINE: {self.title}\n"
-            f"  OUTLET: {self.source}{date_str}{lang}\n"
+            f"  OUTLET: {self.source}{date_str}{lang}{state}\n"
             f"  REPORTED: {self.summary}"
         )
 
@@ -721,7 +774,11 @@ def _rank_key(result: dict):
             return (1, len(PREFERRED_SOURCES) + i, age)
     for i, src in enumerate(PREFERRED_SOURCES_ZH):
         if src in url:
-            return (0, i, age)
+            # State-affiliated Chinese outlets still rank above the Western
+            # wires - they carry the deal flow - but BELOW the independent
+            # Chinese and foreign-Chinese ones, so an independent account is the
+            # anchor whenever one exists.
+            return (0, i + (50 if state_affiliation(url) else 0), age)
     for i, src in enumerate(PREFERRED_SOURCES):
         if src in url:
             return (1, i, age)
@@ -842,6 +899,7 @@ def search_news_for_pillar(
             preview_image_url=preview_image,
             language=r.get("language", "en"),
             age_days=age,
+            state_label=state_affiliation(url),
         ))
 
     logger.info(
@@ -948,6 +1006,8 @@ __all__ = [
     "_is_chinese",
     "PREFERRED_SOURCES_ZH",
     "DEMOTED_SOURCES",
+    "STATE_AFFILIATED",
+    "state_affiliation",
     "PREFERRED_TRADE",
     "MAX_ARTICLE_AGE_DAYS",
 ]

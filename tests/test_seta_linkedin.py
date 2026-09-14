@@ -1390,4 +1390,84 @@ t.check('PUBLIC: the generator passes the fetched articles to the gate',
 t.check('PUBLIC: the retry check gets the same context, or it would block what it just allowed',
         gen_src.count('public_context=public_context') >= 2)
 
+# ============================================================================
+# DO NOT REPUBLISH A GOVERNMENT LINE (2026-09-13)
+# ============================================================================
+# Searching Chinese sources first is right - they carry Europe-China deal flow
+# the Western wires never run. But the TOP-RANKED Chinese source here was
+# cnfin.com, which is 新华财经 (Xinhua), and real posts had been built on 光明网
+# (Guangming Daily), 中国新闻网 and 国际金融报 (People's Daily group). One
+# generated post adopted "pan-securitisation erodes market logic" as its own
+# analysis - an official formulation, not a finding.
+#
+# The rule is ATTRIBUTE, DON'T ASSERT. Their facts are usable; their framing is
+# policy. A Europe-China advisory publishing Beijing's line under its own name
+# loses exactly the European owners it writes for.
+from linkedin_generation.social.news_search import (
+    STATE_AFFILIATED, state_affiliation, _rank_key,
+)
+from linkedin_generation.social.post_quality import (
+    unattributed_official_framing, OFFICIAL_FRAMING,
+)
+
+t.check('STATE: Xinhua Finance is labelled state-affiliated',
+        'state news agency' in (state_affiliation('https://m.cnfin.com/x') or ''))
+t.check('STATE: People\'s Daily group outlets are labelled',
+        state_affiliation('https://www.ifnews.com/y')
+        and state_affiliation('https://difang.gmw.cn/z'))
+t.check('STATE: independent outlets are not labelled',
+        state_affiliation('https://cn.nikkei.com/a') is None
+        and state_affiliation('https://www.reuters.com/c') is None)
+t.check('STATE: non-Chinese state outlets are covered too',
+        'rt.com' in STATE_AFFILIATED and 'sputniknews' in STATE_AFFILIATED)
+
+# Ranked BELOW independent Chinese outlets, above the Western wires - they still
+# carry the deal flow, they just should not be the anchor when a free account exists.
+_xinhua = {'url': 'https://m.cnfin.com/x', 'age_days': 1, 'title': 't'}
+_nikkei = {'url': 'https://cn.nikkei.com/y', 'age_days': 5, 'title': 't'}
+t.check('STATE: an independent Chinese outlet outranks a state one',
+        _rank_key(_nikkei) < _rank_key(_xinhua))
+t.check('STATE: state Chinese outlets are not dropped - they carry real deal news',
+        _rank_key(_xinhua)[0] == 0)
+
+# The label must reach the model, or it cannot know to attribute.
+from linkedin_generation.social.news_search import NewsArticle as _NA
+_a = _NA(title='T', url='https://m.cnfin.com/x', source='Xinhua Finance', summary='s',
+         published_date='today', language='zh',
+         state_label=state_affiliation('https://m.cnfin.com/x'))
+t.check('STATE: the ownership warning reaches the prompt',
+        'OWNERSHIP' in _a.to_context_string() and 'official' in _a.to_context_string())
+
+# --- the gate on the finished post ---
+t.check('FRAMING: the exact line from the real post is caught',
+        unattributed_official_framing(
+            'This reporting shows a key trend: pan-securitization erodes market logic.'))
+t.check('FRAMING: the same claim ATTRIBUTED is fine - that is reporting',
+        not unattributed_official_framing(
+            'Yicai reported that the chamber president said pan-securitization erodes market logic.'))
+t.check('FRAMING: other standard formulations are covered',
+        unattributed_official_framing('The answer is win-win cooperation.')
+        and unattributed_official_framing('This is a Cold War mentality.')
+        and unattributed_official_framing('Brussels is using long-arm jurisdiction.'))
+t.check('FRAMING: ordinary analysis is untouched',
+        not unattributed_official_framing(
+            'EU screening rules now add three months to a typical timetable.'))
+t.check('FRAMING: the list is declared, not buried in the matcher',
+        len(OFFICIAL_FRAMING) > 8)
+t.check('FRAMING: the gate reports it for the retry',
+        any('talking point' in i for i in post_issues(
+            {'headline': 'H', 'body': 'Pan-securitization erodes market logic.',
+             'cta': 'And you?'}, SETA_VOICE)))
+t.check('FRAMING: the prompt tells the model to give the European reading',
+        'looks like protectionism from Beijing' in gen_src)
+
+# --- Thought Leadership is the firm's own view, not someone else's article ---
+_tl = next((p for p in load_seta_campaign().get('content_pillars', [])
+            if p.get('name') == 'Thought Leadership'), None)
+if _tl:
+    t.check('TL: Thought Leadership is experience-led, not news-led',
+            not _tl.get('use_news_search'))
+t.check('TL: the experience block says it is the anchor when no news appears',
+        "THIS IS THE POST'S ANCHOR" in build_experience_context())
+
 sys.exit(t.summary())

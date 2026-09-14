@@ -90,6 +90,13 @@ content_pillars:
     '
 
 - name: Thought Leadership
+  # EXPERIENCE-LED, not news-led (2026-09-13). This pillar is supposed to be
+  # Seta's own view built on its own mandates; with news on, the model anchored
+  # every post on someone else's article and the firm's record became a closing
+  # aside. It now writes from the deal record (social/seta_experience.py), which
+  # is the one thing no competitor can copy. Search phrases are kept so this can
+  # be flipped back deliberately.
+  use_news_search: false
   use_veo: true
   target_client: 'Senior executives, PE fund partners, and family office principals
     seeking forward-looking perspectives on cross-border investment and industrial transformation.
@@ -109,7 +116,6 @@ content_pillars:
   - '#ThoughtLeadership'
   - '#EuropeChinaInvestment'
   - '#IndustrialTransformation'
-  use_news_search: true
   image_prompt: 'Senior Chinese investor and European family business owner seated
     across from each other at a wooden table in a sunlit Milan boardroom. Architectural
     drawings and financial charts spread between them. Warm natural light, bookshelves

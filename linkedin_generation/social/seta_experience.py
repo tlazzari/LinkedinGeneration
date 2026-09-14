@@ -94,6 +94,10 @@ def build_experience_context(pattern: Optional[Dict[str, object]] = None) -> str
 
     lines = [
         "SETA'S OWN DEAL RECORD — real, and the reason this post is worth reading.",
+        "THIS IS THE POST'S ANCHOR when no news block appears above: open on what "
+        "the firm has seen across these mandates, not on a theme and not on "
+        "someone else's article. Twelve years of watching the same thing happen "
+        "is the one thing a competitor cannot copy.",
         "These are aggregates from twelve years of live mandates:",
         "",
     ]
