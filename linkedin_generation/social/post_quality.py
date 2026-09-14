@@ -235,6 +235,11 @@ class BrandVoice:
     # brand whose anonymised descriptions are drawn from a real record and
     # deliberately describe parties by what they are (see confidentiality.py).
     ban_invented_cases: bool = False
+    # Name no company at all unless the press already did. ON for tenants, who
+    # have no counterparty list of their own and should not have to build one.
+    # OFF for TNT (its own product posts name suppliers and standards) and for
+    # Seta (covered by the full confidentiality gate).
+    ban_naming_companies: bool = False
     # Companies this brand must never advertise. Building posts on real news made
     # this urgent (2026-09-13): bearing and toolholding news is very often ABOUT a
     # competitor - a new SKF product, a Schaeffler result, a Haimer chuck - and a
@@ -767,6 +772,17 @@ def post_issues(
                 + ", ".join(f"'{f}'" for f in framing)
                 + ". Attribute it to the outlet that said it and give the other "
                 "side, or drop it"
+            )
+
+    if voice.ban_naming_companies and not is_holiday:
+        from .confidentiality import named_companies
+        named = named_companies(whole, allow=(voice.name,), public_context=sources or "")
+        if named:
+            issues.append(
+                "names a company - " + ", ".join(f"'{n}'" for n in named)
+                + ". Do not name customers, suppliers or partners: describe them "
+                "by what they are ('a German retailer', 'our logistics partner'). "
+                "A company already named in the article you cite is fine"
             )
 
     if voice.ban_invented_cases and not is_holiday:

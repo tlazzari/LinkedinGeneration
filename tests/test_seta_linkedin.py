@@ -1663,4 +1663,64 @@ finally:
     BRANDS.pop('t6666_leak', None)
     _bs.apply_configs()
 
+# ── A TENANT NAMES NO COMPANY, WITH NOTHING TO CONFIGURE (2026-09-14) ──────
+# Seta is protected by a list built from its own mailbox. A tenant has none, and
+# asking each one to curate a "never name these" box was rejected as too much to
+# put on a customer - rightly, because the tenant who most needs the protection
+# is the least likely to fill the box in. So the default is simply: a tenant post
+# does not name companies. Its own name is fine, and so is any company the cited
+# article already named, since repeating the press reveals nothing.
+from linkedin_generation.social.confidentiality import named_companies
+
+_own = ('Probe Furniture Srl',)
+_press = 'Reuters reported that Ceconomy AG faces an EU review.'
+t.check('ZEROCONF: a customer named outright is caught with no list configured',
+        named_companies('We supply Gartenwelt Handels GmbH across Germany.', allow=_own)
+        == ['Gartenwelt Handels GmbH'])
+t.check('ZEROCONF: the company may name itself',
+        not named_companies('Probe Furniture Srl ships from Italy.', allow=_own))
+t.check('ZEROCONF: a company already in the cited article is fine',
+        not named_companies('Ceconomy AG faces an EU review.', allow=_own,
+                            public_context=_press))
+t.check('ZEROCONF: describing a party by what it is stays clean',
+        not named_companies('We supply garden retailers across Germany.', allow=_own))
+t.check('ZEROCONF: it catches Italian and German legal forms alike',
+        named_companies('Our partner Acme Holding S.r.l. handles logistics.', allow=_own)
+        and named_companies('Our partner Acme Holding GmbH handles logistics.', allow=_own))
+
+# Scoping: on for tenants, off for the two brands that need to name things.
+t.check('ZEROCONF: OFF for TNT - its product posts cite suppliers and standards',
+        not TNT_VOICE.ban_naming_companies)
+t.check('ZEROCONF: OFF for Seta - covered by the full confidentiality gate',
+        not SETA_VOICE.ban_naming_companies)
+
+import json as _j3, tempfile as _t3, shutil as _s3
+from pathlib import Path as _P3
+_od3 = _bs.BRAND_DIR
+_td3 = _P3(_t3.mkdtemp())
+try:
+    _bs.BRAND_DIR = _td3
+    (_td3 / 't5555_zc.json').write_text(_j3.dumps({
+        'key': 't5555_zc', 'display_name': 'ZC Srl', 'template': 'tnt',
+        'tone': 'promotional', 'enabled': True,
+        'pillars': [{'name': 'X', 'angle': 'y', 'news_queries': ['q'],
+                     'use_news_search': False}]}))
+    _bs.apply_configs()
+    _zv = BRANDS['t5555_zc'].voice
+    t.check('ZEROCONF: ON for a tenant with nothing configured',
+            _zv.ban_naming_companies)
+    t.check('ZEROCONF: the gate reports it for the retry',
+            any('names a company' in i for i in post_issues(
+                {'headline': 'H', 'body': 'We supply Gartenwelt Handels GmbH.',
+                 'cta': 'Call us. And you?'}, _zv)))
+    t.check('ZEROCONF: the tenant may still name ITSELF',
+            not [i for i in post_issues(
+                {'headline': 'H', 'body': 'ZC Srl ships weekly.',
+                 'cta': 'Call us. And you?'}, _zv) if 'names a company' in i])
+finally:
+    _bs.BRAND_DIR = _od3
+    _s3.rmtree(_td3, ignore_errors=True)
+    BRANDS.pop('t5555_zc', None)
+    _bs.apply_configs()
+
 sys.exit(t.summary())

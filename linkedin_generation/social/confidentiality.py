@@ -286,6 +286,44 @@ def confidentiality_issues(text: str, public_context: str = "") -> List[str]:
     return sorted(set(issues))
 
 
+def named_companies(text: str, allow: Sequence[str] = (), public_context: str = "") -> List[str]:
+    """Companies the text names outright, ignoring ones already in the press.
+
+    ZERO CONFIGURATION, deliberately (2026-09-14). Seta is protected by a list
+    built from its own mailbox; a Bolla tenant has no such list and asking each
+    one to curate a "never name these" box was rejected as too much to put on a
+    customer - correctly, because the tenant who most needs the protection is the
+    least likely to fill the box in.
+
+    So the default is simply: a tenant's post does not name companies. Its own
+    name is allowed, and so is anything the fetched articles already named, since
+    repeating what the press printed reveals nothing. Everything else - a
+    customer, a supplier, a partner under NDA - is caught without the tenant
+    having told us anything.
+    """
+    allowed = {a.lower() for a in allow if a}
+    public = (public_context or "").lower()
+    hits: List[str] = []
+    for m in re.finditer(
+        r"\b([A-Z][\w&.\-]*(?:\s+[A-Z][\w&.\-]*){0,3}\s+(?i:" + _LEGAL_SUFFIX + r"))\b",
+        text,
+    ):
+        tokens = m.group(1).split()
+        while tokens and tokens[0].lower() in {
+            "we", "our", "the", "a", "an", "with", "for", "advised", "sold",
+            "acquired", "at", "of", "and", "to", "by", "from", "this", "that",
+        }:
+            tokens.pop(0)
+        candidate = " ".join(tokens).strip()
+        if len(tokens) < 2:
+            continue
+        low = candidate.lower()
+        if low in allowed or any(a in low for a in allowed) or low in public:
+            continue
+        hits.append(candidate)
+    return sorted(set(hits))
+
+
 def is_publishable(text: str, public_context: str = "") -> bool:
     return not confidentiality_issues(text, public_context)
 
@@ -295,5 +333,6 @@ __all__ = [
     "PUBLIC_DEALS",
     "CONFIDENTIAL_CLAIMS",
     "confidentiality_issues",
+    "named_companies",
     "is_publishable",
 ]

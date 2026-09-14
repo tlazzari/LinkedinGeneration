@@ -129,6 +129,9 @@ def voice_from_config(config: dict, fallback: Optional[BrandVoice] = None) -> Br
         # tenant has neither, so an invented "a client in Saudi Arabia" is pure
         # fabrication published as a customer reference.
         ban_invented_cases=bool(config.get("ban_invented_cases", True)),
+        # Safe by default, with nothing for the tenant to fill in. See
+        # confidentiality.named_companies for why a per-tenant list was rejected.
+        ban_naming_companies=bool(config.get("ban_naming_companies", True)),
         competitors=tuple(
             str(c).strip() for c in (config.get("competitors") or []) if str(c).strip()
         ),
