@@ -1513,4 +1513,26 @@ t.check('COUNT: year spans DO reach it - twelve years of history is the good num
         re.search(r'\b20\d\d\b', _sector_block))
 t.check('COUNT: the prompt says never to state how many', 'NEVER STATE HOW MANY' in _exp_ctx)
 
+# ── A POLICY STORY IS NOT ABOUT LAWYERS (2026-09-13) ───────────────────────
+# Seta's media kept defaulting to the generic boardroom on policy-shaped posts,
+# because a regulation has no obvious scene of its own. It does have a subject:
+# the thing the rule governs. FDI screening of a components maker means that
+# plant and its line; an EV tariff means the cars at the port. The rule is
+# abstract, the thing it touches is not, and the thing it touches is what the
+# reader owns.
+t.check('MEDIA: the policy rule is given on the news branch and the evergreen one',
+        gen_src.count('NOT ABOUT LAWYERS') == 2)
+t.check('MEDIA: it says to show what the rule GOVERNS',
+        'show WHAT THE RULE\n' in gen_src or 'WHAT THE RULE' in gen_src)
+t.check('MEDIA: it gives concrete substitutions, not just a prohibition',
+        'export controls on machine tools' in gen_src
+        and 'cars at the port' in gen_src or 'waiting at the port' in gen_src)
+t.check('MEDIA: meeting rooms and handshakes are called out as the wrong answer',
+        'every advisory firm posts those' in gen_src)
+t.check('MEDIA: a negotiation post may still show a negotiation',
+        'literally about a negotiation' in gen_src
+        or 'literally\\n' in gen_src or 'about a signing' in gen_src)
+t.check('MEDIA: the evergreen branch shows the industry, not an office',
+        'shows that workshop and the two generations in it, not an office' in gen_src)
+
 sys.exit(t.summary())
