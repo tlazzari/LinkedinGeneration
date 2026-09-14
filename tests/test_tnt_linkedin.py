@@ -190,9 +190,13 @@ if _camp is None:
     import yaml as _yaml
     _camp = _yaml.safe_load(open(os.getenv(
         'LINKEDIN_CAMPAIGN_CONFIG', str(PKG_DIR.parent / 'config' / 'linkedin_campaign.yaml'))))
+# CHANGED 2026-09-13: this asserted that EVERY pillar searches news. Forcing news
+# onto an evergreen technical pillar is exactly what produced the Luoyang
+# bolt-on, so which pillars are news-led is now a deliberate per-pillar choice
+# (asserted individually further down). What every pillar must still have is
+# usable phrases, so the choice can be flipped either way without re-research.
 for _p in _camp.get('content_pillars', []):
     _n = _p.get('name', '?')[:34]
-    t.check(f'RULE: TNT pillar "{_n}" searches news', bool(_p.get('use_news_search')))
     t.check(f'RULE: TNT pillar "{_n}" has its own search phrases',
             len(_p.get('news_queries') or []) >= 2)
     t.check(f'RULE: TNT pillar "{_n}" phrases carry no hardcoded year',
@@ -237,10 +241,17 @@ t.check('competitor: a name in the HEADLINE is promotion whatever the wording',
 t.check('competitor: praise vocabulary in the same sentence is promotion',
         competitor_promotion('Workholding matters\nThe leading Haimer chuck sets the standard.',
                              TNT_COMPETITORS) == ['Haimer'])
-t.check('competitor: a plain factual report is NOT promotion - that is the news',
-        competitor_promotion('Spindle vibration costs uptime\nSchaeffler reported a 4% drop '
-                             'in orders last quarter. That matters for lead times.',
+# Moved deeper into the body on 2026-09-13. A competitor in the OPENING sentence
+# is now promotion whatever the wording - the post is built on them either way.
+# Reported factually further down, it is legitimate industry context.
+t.check('competitor: a plain factual report deeper in the body is NOT promotion',
+        competitor_promotion('Spindle vibration costs uptime\nAlignment drift is the usual '
+                             'cause. Schaeffler reported a 4% drop in orders last quarter. '
+                             'That matters for lead times.',
                              TNT_COMPETITORS) == [])
+t.check('competitor: opening ON a competitor IS promotion, even stated neutrally',
+        competitor_promotion('Spindle vibration costs uptime\nSchaeffler reported a 4% drop '
+                             'in orders last quarter.', TNT_COMPETITORS) == ['Schaeffler'])
 t.check('competitor: a post with no competitor in it is clean',
         competitor_promotion('Pull studs and clamping force\nA worn pull stud loses force.',
                              TNT_COMPETITORS) == [])
@@ -272,5 +283,74 @@ t.check('RULE: a post that still carries invented figures is loud and greppable'
 # The phrase is wrapped across two source lines, so match the tail of it.
 t.check('RULE: the general "report, do not strip" rule is unchanged',
         'not strip" (deleting every sentence with a number would gut the post)' in _cg)
+
+# ============================================================================
+# THE LUOYANG POST (2026-09-13) — three separate failures in one dry run
+# ============================================================================
+# A TNT post opened on "Luoyang Bearing Group ... recently listed on the Shenzhen
+# stock exchange" and then pivoted to a canned "cheapest bearing is the most
+# expensive" argument. Every guard reported it clean. Three things were wrong:
+#   1. Luoyang is a COMPETITOR and was not in the list - which held only Western
+#      and Japanese names, absurd when the news search is Chinese-first.
+#   2. The competitor check only looked at the headline, and only for praise
+#      words; the competitor was in the opening sentence, described neutrally.
+#   3. A stock listing has NO causal link to bearing failure. The news was
+#      wallpaper: an opening flourish the rest of the post ignored.
+from linkedin_generation.social.news_search import is_corporate_finance
+
+# --- 1. the list must cover where the news actually comes from ---
+t.check('LUOYANG: Chinese bearing makers are in the competitor list',
+        all(n in TNT_COMPETITORS for n in ('Luoyang Bearing', '洛轴', 'ZWZ', '瓦轴',
+                                           'C&U', '五洲新春', 'Wanxiang')))
+t.check('LUOYANG: the list is not Western-only any more',
+        [x for x in TNT_COMPETITORS if any('一' <= c <= '鿿' for c in x)])
+
+# --- 2. CJK has no word boundaries; the guard assumed it did ---
+t.check('LUOYANG: a Chinese competitor name is matched at all',
+        competitor_promotion('河南老牌轴承国企上市\n洛轴股份上市仪式，行业领先。',
+                             TNT_COMPETITORS) == ['洛轴'])
+t.check('LUOYANG: Chinese praise vocabulary counts as praise',
+        competitor_promotion('标题\n这家公司是行业龙头。洛轴技术领先。', TNT_COMPETITORS))
+
+# --- 3. the anchor is the headline AND the opening sentence ---
+_luoyang = ('THE CHEAPEST BEARING IS OFTEN THE MOST EXPENSIVE.\n'
+            'Luoyang Bearing Group, with over 70 years of history, recently listed on '
+            'the Shenzhen stock exchange. But for distributors, price hides cost.')
+t.check('LUOYANG: the exact post that shipped clean is now flagged',
+        competitor_promotion(_luoyang, TNT_COMPETITORS) == ['Luoyang Bearing'])
+t.check('LUOYANG: a competitor deep in the body, reported factually, is still allowed',
+        competitor_promotion('Spindle vibration costs uptime\nAlignment matters. '
+                             'Schaeffler reported a 4% drop in orders last quarter. '
+                             'That matters for lead times.', TNT_COMPETITORS) == [])
+
+# --- 4. equity stories are not a hook for a company selling components ---
+t.check('LUOYANG: an IPO story is recognised as corporate finance',
+        is_corporate_finance('河南老牌轴承国企上市 传统制造业焕新'))
+t.check('LUOYANG: "IPO周报" is caught - CJK broke the word boundary a SECOND time',
+        is_corporate_finance('IPO周报｜本周4只新股申购，国内轴承制造龙头来了'))
+t.check('LUOYANG: a technical story is not mistaken for finance',
+        not is_corporate_finance('Bearing failures: When normal readings hide the risk')
+        and not is_corporate_finance('A costly mistake in spindle alignment'))
+t.check('LUOYANG: both filters run at SELECTION, so the model never sees the article',
+        'avoid_finance=True' in _cg and 'avoid_companies=TNT_VOICE.competitors' in _cg)
+
+# --- 5. the connection must be causal, not decorative ---
+t.check('LUOYANG: the prompt demands a causal connection',
+        'CONNECTION MUST BE REAL' in _cg and 'decoration, not a' in _cg)
+t.check('LUOYANG: the prompt says no news beats bolted-on news',
+        'worse than one' in _cg)
+
+# --- 6. not every pillar is news-shaped ---
+# Forcing news onto an evergreen technical pillar is what produced the bolt-on.
+_by_name = {p.get('name'): p for p in _camp.get('content_pillars', [])}
+for _n, _want in (('Myth Busters', False), ('When Bearings Fail', False),
+                  ('Extreme Applications', False), ('Product Spotlight', False),
+                  ('Inside the Factory', True), ('Workholding Precision', True)):
+    _p = next((v for k, v in _by_name.items() if k.startswith(_n)), None)
+    if _p:
+        t.check(f'LUOYANG: "{_n}" is {"news-led" if _want else "evergreen"}',
+                bool(_p.get('use_news_search')) is _want)
+t.check('LUOYANG: an evergreen pillar KEEPS its phrases so it can be flipped back',
+        all(_p.get('news_queries') for _p in _by_name.values()))
 
 sys.exit(t.summary())

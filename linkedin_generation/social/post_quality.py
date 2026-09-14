@@ -257,11 +257,30 @@ SETA_VOICE = BrandVoice(
 # Bearings, toolholding and workholding names that dominate this trade press.
 # A TNT post opening on one of these, in praising terms, is an advert for them.
 TNT_COMPETITORS = (
+    # Western and Japanese
     "SKF", "Schaeffler", "FAG", "INA", "NSK", "NTN", "Timken", "Koyo", "JTEKT",
     "NACHI", "THK", "IKO", "RBC Bearings", "Rexnord", "Moog",
     "Haimer", "Sandvik", "Kennametal", "Big Daishowa", "Rego-Fix", "Schunk",
     "Hainbuch", "Lyndex", "Nikken", "Emuge", "Guhring", "Walter Tools",
     "Seco Tools", "Iscar", "Mitsubishi Materials", "Kyocera",
+    # CHINESE MAKERS - added 2026-09-13 after the list missed the obvious case.
+    # The first list was Western and Japanese only, which is absurd when the news
+    # search is deliberately Chinese-first: a dry run opened a TNT post on Luoyang
+    # Bearing Group's Shenzhen listing and the guard reported "no competitor
+    # promoted", because 洛阳/LYC was nowhere in it. Two of the three articles
+    # that run cited were Chinese bearing makers.
+    "Luoyang Bearing", "LYC", "洛阳轴承", "洛轴",
+    "Wafangdian", "ZWZ", "瓦房店轴承", "瓦轴",
+    "Harbin Bearing", "HRB", "哈尔滨轴承", "哈轴",
+    "C&U", "人本", "人本集团",
+    "Wanxiang", "万向钱潮",
+    "Wuzhou Xinchun", "五洲新春",
+    "Tianma Bearing", "天马轴承",
+    "Cixing", "慈兴",
+    "Xiangyang Bearing", "襄阳轴承",
+    "Changshan Beiming", "常山北明",
+    "Zhejiang Sanhua", "三花",
+    "NRB Bearings", "Tata Bearings",
 )
 
 TNT_VOICE = BrandVoice(
@@ -383,34 +402,59 @@ def vague_source_hits(text: str) -> List[str]:
     return hits
 
 
+def _has_cjk(text: str) -> bool:
+    return any("\u4e00" <= ch <= "\u9fff" for ch in text)
+
+
 # Words that turn a mention into an endorsement.
 _PRAISE_RE = (
     r"(?:leading|market[- ]leading|best|superior|premium|innovative|"
     r"advanced|breakthrough|world[- ]class|top|trusted|renowned|excellen\w*|"
-    r"outstanding|unrivalled|unrivaled|sets the standard|gold standard)"
+    r"outstanding|unrivalled|unrivaled|sets the standard|gold standard|"
+    r"years of history|heritage|pioneer\w*|flagship|state[- ]of[- ]the[- ]art|"
+    # Chinese praise vocabulary. Absent at first, so a CN-sourced post could
+    # praise a competitor in Chinese terms and pass clean.
+    r"领先|优质|高端|一流|权威|知名|龙头|标杆|实力雄厚|首屈一指)"
 )
 
 
 def competitor_promotion(text: str, competitors: Sequence[str]) -> List[str]:
     """Competitors the post appears to be selling FOR, not merely reporting on.
 
-    A competitor named in the headline is treated as promotion whatever the
-    wording: the headline is what the feed shows, so "SKF launches X" published
-    from TNT's page reads as TNT amplifying SKF. Elsewhere it takes praise
-    vocabulary within the same sentence to count.
+    A competitor named in the ANCHOR - the headline or the opening sentence - is
+    promotion whatever the wording. That is the part the feed shows and the part
+    the whole post is built on, so "Luoyang Bearing Group listed on the Shenzhen
+    exchange" as an opener is TNT amplifying a competitor's corporate news even
+    though no adjective is attached. Widened from headline-only on 2026-09-13,
+    when exactly that post was generated and reported clean.
+
+    Deeper in the body it takes praise vocabulary in the same sentence, because a
+    competitor's move is often legitimately the story - "Schaeffler reported a 4%
+    drop in orders, which matters for lead times" is reporting, not promotion.
     """
     hits: List[str] = []
     lines = text.split("\n", 1)
-    headline = lines[0] if lines else ""
+    body = lines[1] if len(lines) > 1 else ""
+    first_sentence = re.split(r"(?<=[.!?。])\s*", body.strip(), maxsplit=1)[0] if body else ""
+    anchor = (lines[0] if lines else "") + " " + first_sentence
+    headline = anchor
     for name in competitors:
-        pattern = r"(?<!\w)" + re.escape(name) + r"(?!\w)"
-        if re.search(pattern, headline, re.IGNORECASE):
+        # A Chinese name has no word boundary - every CJK character is \w, so
+        # "(?<!\w)洛阳" can never match mid-sentence, which is exactly how 洛阳
+        # slipped past. Match those as plain substrings.
+        if _has_cjk(name):
+            in_headline = name in headline
+            sentence_hit = lambda sentence, n=name: n in sentence
+        else:
+            pattern = r"(?<!\w)" + re.escape(name) + r"(?!\w)"
+            in_headline = bool(re.search(pattern, headline, re.IGNORECASE))
+            sentence_hit = lambda sentence, p=pattern: bool(
+                re.search(p, sentence, re.IGNORECASE))
+        if in_headline:
             hits.append(name)
             continue
         for sentence in re.split(r"(?<=[.!?])\s+", text):
-            if re.search(pattern, sentence, re.IGNORECASE) and re.search(
-                _PRAISE_RE, sentence, re.IGNORECASE
-            ):
+            if sentence_hit(sentence) and re.search(_PRAISE_RE, sentence, re.IGNORECASE):
                 hits.append(name)
                 break
     return sorted(set(hits))

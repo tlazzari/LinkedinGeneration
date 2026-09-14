@@ -58,6 +58,11 @@ class LinkedInPostGenerator(BaseContentGenerator):
                 pillar.name,
                 num_articles=3,
                 queries=list(getattr(pillar, "news_queries", []) or []),
+                # TNT sells components, so an IPO or a results call gives it
+                # nothing to say, and a story about a competitor must never be the
+                # anchor. Both are excluded before the model ever sees them.
+                avoid_finance=True,
+                avoid_companies=TNT_VOICE.competitors,
             )
             news_context = build_news_context(news_articles)
             if not news_articles:
@@ -377,7 +382,16 @@ class LinkedInPostGenerator(BaseContentGenerator):
                 "to the reader's machine. The news earns the attention; the product answers "
                 "it. A post that only summarises the news is a wasted post for TNT.\n"
                 "5. Do NOT paste any URL — the link is published as the first comment.\n"
-                "6. NEVER ADVERTISE A COMPETITOR. Much of this trade press is about "
+                "6. THE CONNECTION MUST BE REAL. The link between the story and the "
+                "component must be CAUSAL and specific - the story changes something "
+                "about how the reader's machine is specified, bought, maintained or "
+                "runs. If the only link you can write is 'this shows the market values "
+                "quality, and quality is what we sell', that is decoration, not a "
+                "connection: pick a DIFFERENT article from the list, or write the post "
+                "from the pillar alone and mention no news at all. A post that uses a "
+                "story as an opening flourish and then ignores it is worse than one "
+                "with no news in it.\n"
+                "7. NEVER ADVERTISE A COMPETITOR. Much of this trade press is about "
                 + ", ".join(TNT_VOICE.competitors[:12]) + " and others like them. "
                 "If the story is about one of them, that is fine as a FACT — report what "
                 "happened and what it means for the reader's machine — but never put their "

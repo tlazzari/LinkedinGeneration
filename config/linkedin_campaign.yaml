@@ -39,7 +39,9 @@ image_provider:
     alt_text: Close-up of industrial bearings lined on a production table
 content_pillars:
 - name: 'Myth Busters: Bearing Secrets They Never Told You'
-  use_news_search: true
+  # Evergreen by nature: a technical misconception is timeless; no news makes it truer.
+  # Search phrases kept so this can be flipped back deliberately.
+  use_news_search: false
   news_queries:
   - bearing manufacturer industry
   - bearing technology development
@@ -84,7 +86,9 @@ content_pillars:
 
     '
 - name: 'When Bearings Fail: Forensic Stories from the Field'
-  use_news_search: true
+  # Evergreen by nature: a forensic case study stands on its own evidence.
+  # Search phrases kept so this can be flipped back deliberately.
+  use_news_search: false
   news_queries:
   - bearing failure maintenance industry
   - predictive maintenance rotating equipment
@@ -130,7 +134,9 @@ content_pillars:
 
     '
 - name: 'Extreme Applications: Bearings at the Limit'
-  use_news_search: true
+  # Evergreen by nature: an application story is evergreen engineering, not an event.
+  # Search phrases kept so this can be flipped back deliberately.
+  use_news_search: false
   news_queries:
   - high temperature bearing application
   - wind turbine bearing
@@ -221,7 +227,9 @@ content_pillars:
 
     '
 - name: 'Product Spotlight: Speciality & Non-Standard Solutions'
-  use_news_search: true
+  # Evergreen by nature: a product explainer has no news hook by nature.
+  # Search phrases kept so this can be flipped back deliberately.
+  use_news_search: false
   news_queries:
   - custom engineered components industry
   - non standard bearing application

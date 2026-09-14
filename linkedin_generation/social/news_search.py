@@ -8,7 +8,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import List, Optional, Sequence
 from urllib.parse import urlparse
 
 import requests
@@ -650,6 +650,43 @@ def _best_source_label(url: str, result: dict) -> str:
     return label
 
 
+# Equity-market stories: an IPO, a placement, a results call. For an M&A advisor
+# these ARE the subject. For a company selling bearings and toolholders they are
+# a dead end - there is no technical connection to draw, so the model invents a
+# decorative one. That is exactly what happened on 2026-09-13: a post opened on
+# Luoyang Bearing Group's Shenzhen listing and then pivoted to a canned
+# "cheapest bearing is the most expensive" argument. The listing had nothing to
+# do with the argument; the news was wallpaper.
+# Latin terms need word boundaries so "stake" does not match "mistake".
+_FINANCE_LATIN_RE = re.compile(
+    r"\b(listing|listed|flotation|placement|share sale|stake|"
+    r"earnings|results|quarterly|half[- ]year|revenue (?:rose|fell)|"
+    r"raises?|raised|fundrais\w*|valuation|shareholder|dividend|"
+    r"stock exchange|bourse)\b",
+    re.IGNORECASE,
+)
+
+# Substring markers: CJK has no word boundaries, and "IPO" is unambiguous enough
+# to match anywhere. BOTH were needed - the boundary form silently failed on
+# "IPO周报" (O followed by a CJK word character is not a boundary), so a post
+# opened on "four Chinese bearing manufacturers are applying for IPOs this week"
+# AFTER the finance filter was supposedly in place. Second time the same CJK
+# boundary assumption broke a guard; assume it is wrong everywhere.
+_FINANCE_SUBSTRINGS = (
+    "ipo", "上市", "挂牌", "募资", "融资", "定增", "增发", "业绩", "财报",
+    "季报", "年报", "股份", "股价", "投资者", "新股", "申购", "营收", "净利",
+    "涨停", "跌停", "市值", "招股",
+)
+
+
+def is_corporate_finance(title: str) -> bool:
+    """True when the story is about the money, not the engineering."""
+    t = (title or "").lower()
+    if any(m in t for m in _FINANCE_SUBSTRINGS):
+        return True
+    return bool(_FINANCE_LATIN_RE.search(title or ""))
+
+
 def _is_chinese(text: str) -> bool:
     """Any CJK ideograph means this query belongs to the Chinese search."""
     return any("\u4e00" <= ch <= "\u9fff" for ch in text)
@@ -679,6 +716,8 @@ def search_news_for_pillar(
     num_articles: int = 3,
     fetch_images: bool = True,
     queries: Optional[List[str]] = None,
+    avoid_finance: bool = False,
+    avoid_companies: Optional[Sequence[str]] = None,
 ) -> List[NewsArticle]:
     """Find recent, specific news for a content pillar.
 
@@ -716,8 +755,24 @@ def search_news_for_pillar(
             title = (r.get("title") or "").strip().lower()
             if not url or url in seen_urls or (title and title in seen_titles):
                 continue
-            if is_spam(r.get("title", ""), url):
-                logger.info("Dropping SEO spam result: %s", (r.get("title") or "")[:60])
+            title_raw = r.get("title", "") or ""
+            if is_spam(title_raw, url):
+                logger.info("Dropping SEO spam result: %s", title_raw[:60])
+                continue
+            # A technical brand cannot build a post on an IPO, and a post built on
+            # a competitor's news advertises the competitor. Both are dropped at
+            # SELECTION, not argued with in the prompt: an article that should not
+            # be the anchor should never be offered as one.
+            if avoid_finance and is_corporate_finance(title_raw):
+                logger.info("Dropping equity-market story (no technical hook): %s",
+                            title_raw[:60])
+                continue
+            if avoid_companies and any(
+                (c in title_raw) if any("\u4e00" <= ch <= "\u9fff" for ch in c)
+                else re.search(r"(?<!\w)" + re.escape(c) + r"(?!\w)", title_raw, re.I)
+                for c in avoid_companies
+            ):
+                logger.info("Dropping story about a competitor: %s", title_raw[:60])
                 continue
             age = r.get("age_days")
             if age is not None and age > MAX_ARTICLE_AGE_DAYS:
@@ -867,6 +922,7 @@ __all__ = [
     "provider_health",
     "providers_reachable",
     "is_spam",
+    "is_corporate_finance",
     "SPAM_MARKERS",
     "build_news_context",
     "fetch_article_preview_image",
