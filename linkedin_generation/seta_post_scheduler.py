@@ -32,6 +32,7 @@ from linkedin_generation.social.image_providers import (
 )
 from linkedin_generation.social.news_search import fetch_article_preview_image
 from linkedin_generation.social.brand import BRANDS
+from linkedin_generation.social.seta_content_generation import ConfidentialityBlocked
 from linkedin_generation.social.brand_store import campaign_for
 from linkedin_generation.social.post_delivery import (
     delivery_mode as resolve_delivery_mode,
@@ -432,13 +433,24 @@ def run_single_generation(
             return
 
     # Generate post (chart pillars pass live data summary so LLM references real numbers)
-    post = generator.generate(
-        pillar=pillar,
-        scheduled_for=scheduled_for,
-        post_type=post_type,
-        image_mode="photo",
-        chart_data=chart_data_summary,
-    )
+    # A post blocked on confidentiality ends the run - it must not be retried
+    # into existence or published in any other form. Skipping a slot is the
+    # correct outcome: see ConfidentialityBlocked in seta_content_generation.
+    try:
+        post = generator.generate(
+            pillar=pillar,
+            scheduled_for=scheduled_for,
+            post_type=post_type,
+            image_mode="photo",
+            chart_data=chart_data_summary,
+        )
+    except ConfidentialityBlocked as exc:
+        logging.error(
+            "CONFIDENTIALITY_BLOCKED: no post today - the draft named a "
+            "counterparty or a confidential figure and could not be cleared: %s",
+            exc,
+        )
+        return None
 
     if pillar.use_chart:
         image_payload = ImagePayload(
@@ -795,12 +807,23 @@ def _run_holiday_post(
     tz = ZoneInfo(campaign.timezone)
     scheduled_for = datetime.now(tz=tz)
 
-    post = generator.generate(
-        pillar=holiday_pillar,
-        scheduled_for=scheduled_for,
-        post_type="holiday",
-        image_mode="photo",
-    )
+    # A post blocked on confidentiality ends the run - it must not be retried
+    # into existence or published in any other form. Skipping a slot is the
+    # correct outcome: see ConfidentialityBlocked in seta_content_generation.
+    try:
+        post = generator.generate(
+            pillar=holiday_pillar,
+            scheduled_for=scheduled_for,
+            post_type="holiday",
+            image_mode="photo",
+        )
+    except ConfidentialityBlocked as exc:
+        logging.error(
+            "CONFIDENTIALITY_BLOCKED: no post today - the draft named a "
+            "counterparty or a confidential figure and could not be cleared: %s",
+            exc,
+        )
+        return None
 
     images_dir = output_dir / "images"
     try:

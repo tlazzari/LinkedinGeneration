@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 from .campaign_config import CampaignConfig, PostPillar
 from .news_search import NewsArticle, search_news_for_pillar, build_news_context
 from .base_content import GeneratedPost, BaseContentGenerator
+from .confidentiality import confidentiality_issues
+from .seta_experience import build_experience_context
 from .media_prompts import compose_media_prompt
 from .post_quality import PLAIN_ENGLISH_DIRECTIVE, SETA_VOICE, apply_fixes, post_issues
 
@@ -18,6 +20,14 @@ if TYPE_CHECKING:
     from linkedin_generation.holiday.calendars import HolidayEvent
 
 logger = logging.getLogger(__name__)
+
+
+class ConfidentialityBlocked(RuntimeError):
+    """Raised instead of returning a post that names a counterparty.
+
+    A distinct exception so the scheduler can skip the day cleanly rather than
+    treating it as a generation failure to retry.
+    """
 
 
 class SetaLinkedInPostGenerator(BaseContentGenerator):
@@ -56,6 +66,12 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             else:
                 logger.warning(f"No news articles found for pillar: {pillar.name}")
 
+        # The firm's own deal record, as shape only - no party is named, because
+        # none is loaded (see seta_experience). Twelve years of live mandates is
+        # the thing a competitor cannot copy, and it is what makes a post worth
+        # reading when there is no news worth building on.
+        experience_context = "" if post_type == "holiday" else build_experience_context()
+
         raw = self.llm_client.complete(
             self._build_prompt(
                 pillar=pillar,
@@ -63,6 +79,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                 image_mode=image_mode,
                 holiday=holiday,
                 news_context=news_context,
+                experience_context=experience_context,
                 chart_data=chart_data,
             ),
             temperature=0.8,
@@ -72,7 +89,8 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         # context and the human-curated proof points from the campaign YAML.
         sources = "\n".join(
             part
-            for part in (chart_data, news_context, "\n".join(pillar.proof_points))
+            for part in (chart_data, news_context, experience_context,
+                         "\n".join(pillar.proof_points))
             if part
         )
 
@@ -93,6 +111,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                     image_mode=image_mode,
                     holiday=holiday,
                     news_context=news_context,
+                    experience_context=experience_context,
                     chart_data=chart_data,
                     quality_feedback=issues,
                 ),
@@ -106,6 +125,49 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                 payload = retry_payload
 
         payload = apply_fixes(payload, SETA_VOICE)
+
+        # ── CONFIDENTIALITY: THE ONE CHECK THAT BLOCKS ────────────────────────
+        # Every other rule here reports and lets the post go; naming a
+        # counterparty or quoting a confidential outcome is different in kind.
+        # Tom, 2026-09-13: "make sure not to make any name if the deal or the data
+        # is not already public and this is extremely important we could get sued
+        # for failure to do so." So this one refuses: one focused retry naming the
+        # exact problem, and if that does not clear it, NO POST TODAY. A missed
+        # Tuesday costs nothing; a named counterparty under NDA is a lawsuit.
+        conf = confidentiality_issues(
+            " ".join(str(payload.get(k, "")) for k in ("headline", "body", "cta"))
+        )
+        if conf:
+            logger.error("CONFIDENTIALITY: %s - regenerating once", "; ".join(conf))
+            safe_raw = self.llm_client.complete(
+                self._build_prompt(
+                    pillar=pillar, post_type=post_type, image_mode=image_mode,
+                    holiday=holiday, news_context=news_context,
+                    experience_context=experience_context, chart_data=chart_data,
+                    quality_feedback=conf + [
+                        "Name NO company and NO person. Describe them only by what they "
+                        "are: 'a German heat-treatment business', 'a Chinese strategic "
+                        "buyer', 'a family-owned components maker in the north of Italy'. "
+                        "Quote no deal figure. The point of the post is the pattern, not "
+                        "the parties."
+                    ],
+                ),
+                temperature=0.6, max_tokens=800,
+            )
+            safe_payload = apply_fixes(
+                self._strip_urls(self._parse_response(safe_raw), news_articles, post_type),
+                SETA_VOICE,
+            )
+            still = confidentiality_issues(
+                " ".join(str(safe_payload.get(k, "")) for k in ("headline", "body", "cta"))
+            )
+            if still:
+                logger.error(
+                    "CONFIDENTIALITY_BLOCKED: refusing to publish - %s", "; ".join(still)
+                )
+                raise ConfidentialityBlocked("; ".join(still))
+            payload = safe_payload
+
         remaining = post_issues(payload, SETA_VOICE, sources=sources, post_type=post_type)
         if remaining:
             logger.warning(
@@ -227,6 +289,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         image_mode: str,
         holiday: "HolidayEvent" | None = None,
         news_context: str = "",
+        experience_context: str = "",
         chart_data: str = "",
             quality_feedback: Optional[List[str]] = None,
     ) -> str:
@@ -384,7 +447,8 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             f"\n{PLAIN_ENGLISH_DIRECTIVE}\n"
             f"Apply these directives:\n{post_directives}\n"
             f"{news_requirements}"
-            f"{chart_requirements}"
+            + (f"\n\n{experience_context}\n" if experience_context else "")
+            + f"{chart_requirements}"
             + (
                 f"\nCOMPANY-SPECIFIC MATERIAL (supplied by the account owner - treat as "
                 f"authoritative for facts about this company):\n{brand_material}\n"

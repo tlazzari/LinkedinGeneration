@@ -570,8 +570,13 @@ t.check('RULE: TNT generator runs the shared gate',
         'post_issues(payload, TNT_VOICE' in _tnt_src and 'apply_fixes(payload, TNT_VOICE)' in _tnt_src)
 t.check('RULE: TNT prompt asks for a closing question as well as the CTA',
         'end with a genuine open question' in _tnt_src)
-t.check('RULE: TNT prompt forbids invented failure costs',
-        'invent failure costs' in _tnt_src)
+# Rewritten 2026-09-13: the flat ban became a three-way rule (sourced figures,
+# figures with the working shown, and plucked statistics which stay banned),
+# because a solid calculation is not an invented number.
+t.check('RULE: TNT prompt still bans plucked statistics',
+        'NOT ALLOWED' in _tnt_src and 'no source and no working' in _tnt_src)
+t.check('RULE: TNT prompt allows a figure whose working is shown',
+        'show the working in the post' in _tnt_src)
 
 t.check('RULE: TNT may name itself in the body, Seta may not',
         post_issues({'headline': 'PRELOAD ERROR STOPPED A LINE',
@@ -1262,5 +1267,104 @@ if _soc_lib2.exists():
 _cfg_src = (PKG_DIR / 'social' / 'brand_store.py').read_text()
 t.check('BOLLA: the pipeline respects a tenant pillar that opted out of news',
         'p.get("use_news_search", True)' in _cfg_src)
+
+# ============================================================================
+# CONFIDENTIALITY — THE ONE GATE THAT BLOCKS (2026-09-13)
+# ============================================================================
+# Posts now draw on twelve years of real mandates. Tom: "just make sure not to
+# make any name if the deal or the data is not already public and this is
+# extremely important we could get sued for failure to do so."
+#
+# A prompt cannot carry that. The model has been shown twice in one day to ignore
+# an instruction it had been given since day one. So names are checked against the
+# ACTUAL counterparty list from the knowledge base - not a list someone
+# remembered to write - and this is the only check in the pipeline that REFUSES
+# to publish rather than warning. A missed Tuesday costs nothing; a named
+# counterparty under NDA is a lawsuit.
+from linkedin_generation.social.confidentiality import (
+    confidentiality_issues, is_publishable, PUBLIC_DEALS, OWN_NAMES, _known_names,
+)
+from linkedin_generation.social.seta_content_generation import ConfidentialityBlocked
+from linkedin_generation.social.seta_experience import (
+    sector_patterns, build_experience_context, MIN_DEALS_FOR_A_PATTERN,
+)
+
+_names = _known_names()
+t.check('CONF: the real counterparty list loads from the knowledge base',
+        len(_names['orgs']) > 500 and len(_names['people']) > 500)
+
+# --- what MUST be blocked ---
+t.check('CONF: a company name with a legal suffix is blocked',
+        confidentiality_issues('We advised Muster Industrie GmbH on the disposal.'))
+t.check('CONF: an Italian legal form is blocked too',
+        confidentiality_issues('The buyer was Acme Holding S.r.l. near Brescia.'))
+t.check('CONF: a confidential deal outcome from the deck is blocked',
+        confidentiality_issues('The process closed at 11x EBITDA.'))
+t.check('CONF: real counterparties from the record are blocked',
+        all(confidentiality_issues(f'We ran a sell-side process for {n}.')
+            for n in ('Iltar Italbox', 'One Magnet', 'Brite Line')))
+t.check('CONF: a multi-word name of ordinary words is still a company',
+        confidentiality_issues('We advised One Magnet last year.'))
+
+# --- what must stay publishable, or the gate gets switched off ---
+t.check('CONF: the firm may name ITSELF',
+        is_publishable('Seta Capital has run industrial mandates for twelve years.'))
+t.check('CONF: mailbox extraction artefacts do not block ordinary sentences',
+        is_publishable('A significant global event shaped your cross border strategy.'))
+t.check('CONF: anonymised descriptions are the intended output',
+        is_publishable('We advised a German heat-treatment business on a sale to a '
+                       'Chinese strategic buyer.'))
+t.check('CONF: deals Seta already publishes may be named',
+        is_publishable('Carioca and Epistolio are public case studies.'))
+t.check('CONF: the public-deal list is short and explicit',
+        0 < len(PUBLIC_DEALS) < 30 and 'Carioca' in PUBLIC_DEALS)
+t.check('CONF: the firm\'s own names are declared', 'Seta Capital' in OWN_NAMES)
+
+# --- it must fail CLOSED ---
+_src_conf = (PKG_DIR / 'social' / 'confidentiality.py').read_text()
+t.check('CONF: an unloadable counterparty list refuses to clear anything',
+        'refusing to clear this post' in _src_conf)
+t.check('CONF: the gate BLOCKS rather than warns',
+        'raise ConfidentialityBlocked' in gen_src)
+t.check('CONF: a blocked post ends the run instead of publishing something else',
+        'CONFIDENTIALITY_BLOCKED' in sched_src and 'return None' in sched_src)
+t.check('CONF: it gets exactly one focused retry before refusing',
+        'regenerating once' in gen_src and 'Name NO company and NO person' in gen_src)
+
+# --- the experience source never loads an identity in the first place ---
+_src_exp = (PKG_DIR / 'social' / 'seta_experience.py').read_text()
+# Check the SQL, not the docstring - the docstring says the words in order to
+# explain why they are absent, which my first version read as a violation.
+_sql = _src_exp.split('rows = _query(')[1].split(')')[0]
+t.check('EXPERIENCE: the query selects no deal name and no counterparty',
+        'deal_name' not in _sql and 'counterparty_org' not in _sql)
+t.check('EXPERIENCE: a pattern needs several mandates, or it is an anecdote',
+        MIN_DEALS_FOR_A_PATTERN >= 4)
+_pats = sector_patterns()
+t.check('EXPERIENCE: real aggregates come back from the deal record', len(_pats) > 0)
+if _pats:
+    t.check('EXPERIENCE: every pattern clears the confidentiality gate',
+            all(is_publishable(str(p)) for p in _pats))
+    t.check('EXPERIENCE: no pattern carries a name field',
+            all(not any(k in p for k in ('deal_name', 'counterparty_org', 'name'))
+                for p in _pats))
+_ctx = build_experience_context()
+t.check('EXPERIENCE: the prompt block itself is publishable', is_publishable(_ctx))
+t.check('EXPERIENCE: it tells the model to name nobody, first and absolutely',
+        'NAME NOBODY' in _ctx)
+t.check('EXPERIENCE: missing data is not rendered as zero',
+        'genuinely not recorded' in _ctx)
+t.check('EXPERIENCE: it is wired into the Seta prompt',
+        'experience_context' in gen_src)
+
+# --- a worked figure is not an invented one ---
+from linkedin_generation.social.post_quality import unsupported_statistics
+t.check('CALC: a plucked statistic is still flagged',
+        unsupported_statistics('Misalignment cuts bearing life by 40%.', '') == ['40%'])
+t.check('CALC: a figure with its working shown is allowed',
+        unsupported_statistics('Replacing a EUR 40 bearing 3 times a year is EUR 120.', '') == [])
+t.check('CALC: a derived engineering figure is allowed',
+        unsupported_statistics('A 20 mm bore at 3000 rpm gives roughly 3.1 m/s surface speed.',
+                               '') == [])
 
 sys.exit(t.summary())

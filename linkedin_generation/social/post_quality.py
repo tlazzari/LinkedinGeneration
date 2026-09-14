@@ -366,6 +366,26 @@ def statistic_values(text: str) -> List[str]:
     return [m.group(0).strip() for m in _STATISTIC.finditer(text)]
 
 
+# Arithmetic shown in the post itself. Tom, 2026-09-13: "something you can
+# calculate even if not fully backed by existing data but backed by solid
+# calculation is fine". A worked figure is not an invented one - the reader can
+# check the step and disagree with the assumption, which a plucked statistic
+# never allows. So a number is also supported when the sentence around it shows
+# where it came from.
+_WORKING_RE = re.compile(
+    r"(?:×|\bx\b|\*|/|÷|per\b|each\b|times\b|÷|=|equals\b|"
+    r"gives\b|works out\b|that is\b|i\.e\.|roughly\b|about\b|"
+    r"assum\w+|if you\b|at \d)",
+    re.IGNORECASE,
+)
+
+
+def _has_working(sentence: str) -> bool:
+    """True when the sentence shows how its number was arrived at."""
+    numbers = re.findall(r"\d[\d,.]*", sentence)
+    return len(numbers) >= 2 and bool(_WORKING_RE.search(sentence))
+
+
 def unsupported_statistics(text: str, sources: str) -> List[str]:
     """Statistics in text that do not trace back to the fetched data.
 
@@ -379,6 +399,13 @@ def unsupported_statistics(text: str, sources: str) -> List[str]:
             available.append(float(match.group(0)))
         except ValueError:
             continue
+    # Sentences that show their own arithmetic: a figure inside one is worked,
+    # not invented, and the reader can check the step.
+    worked: List[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        if _has_working(sentence):
+            worked.extend(re.findall(r"\d[\d,.]*", sentence))
+
     unsupported: List[str] = []
     for claim in statistic_values(text):
         raw = re.sub(r"[^\d.]", "", claim)
@@ -387,8 +414,11 @@ def unsupported_statistics(text: str, sources: str) -> List[str]:
         except ValueError:
             continue
         decimals = len(raw.split(".")[1]) if "." in raw else 0
-        if not any(round(source, decimals) == value for source in available):
-            unsupported.append(claim)
+        if any(round(source, decimals) == value for source in available):
+            continue
+        if any(raw == re.sub(r"[^\d.]", "", w) for w in worked):
+            continue          # shown working - allowed, see _has_working
+        unsupported.append(claim)
     return unsupported
 
 
