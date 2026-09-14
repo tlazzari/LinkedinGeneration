@@ -230,6 +230,11 @@ class BrandVoice:
     # for naming TNT twice (seen 2026-09-13 on a pull-stud post that was
     # otherwise exactly right).
     max_brand_mentions: int = 1
+    # Whether the brand may narrate specific customer engagements. OFF for a
+    # product brand whose "story" pillars otherwise invent the customer; ON for a
+    # brand whose anonymised descriptions are drawn from a real record and
+    # deliberately describe parties by what they are (see confidentiality.py).
+    ban_invented_cases: bool = False
     # Companies this brand must never advertise. Building posts on real news made
     # this urgent (2026-09-13): bearing and toolholding news is very often ABOUT a
     # competitor - a new SKF product, a Schaeffler result, a Haimer chuck - and a
@@ -291,6 +296,7 @@ TNT_VOICE = BrandVoice(
     # intended shape, not a defect.
     max_brand_mentions=3,
     competitors=TNT_COMPETITORS,
+    ban_invented_cases=True,
     brand_in_closing_only=False,
     overused_headline_terms=(
         "myth",
@@ -400,6 +406,92 @@ def self_deal_counts(text: str) -> List[str]:
         if len(value) == 4 and value.startswith(("19", "20")):
             continue
         hits.append(m.group(0).strip())
+    return sorted(set(hits))
+
+
+# INVENTED CASE STUDIES (2026-09-14). A dry run of all ten pillars found TNT
+# posts narrating customer work that never happened:
+#   "Our TNT Motion engineer, David, visited a client in Saudi Arabia last year"
+#   "A major steel mill in Alexandria, Egypt... failures every 3 months"
+#   "An Eastern European food processing plant... cost over EUR 18,000"
+# A named colleague who may not exist and customers that certainly do not. The
+# invented-figures rule only polices numbers, so the STORIES sailed through.
+#
+# The pillars are called "Forensic Stories from the Field" and "Stories from Our
+# Engineers", so narrative is the point - but the MECHANISM is what is true and
+# useful. "In a washdown environment moisture works past a worn lip seal and the
+# race corrodes" teaches the reader something and claims nothing. Naming a
+# country, a customer or a colleague turns it into a testimonial for work that
+# was never done.
+# The lead-in is case-insensitive (a sentence starts "Our engineer...") but the
+# NAME capture stays case-sensitive, or an ordinary lowercase word would read as
+# a person. A blanket flag on the whole pattern would do exactly that; no flag at
+# all meant "Our" never matched "our" and the rule silently never fired.
+_CASE_PERSON_RE = re.compile(
+    r"\b(?i:our|my|a)\s+(?i:[\w-]+\s+){0,3}?"
+    r"(?i:engineer|technician|colleague|specialist|advisor|manager)s?\b,?\s+"
+    r"([A-Z][a-z]{2,})",
+)
+# A customer the post invents and then locates or costs.
+# Arbitrary adjectives and plurals: the first version required the noun to
+# follow the article almost immediately, so "A major STEEL mill" and "water
+# treatment PLANTS" both slipped through on the very examples it was written for.
+_CUSTOMER_NOUNS = (r"(?:client|customer|plant|mill|factory|facility|producer|"
+                   r"manufacturer|operator|refinery|foundry|processor)s?")
+# Up to FIVE adjectives: "A major Eastern European food processing plant" has
+# five and slipped past a limit of three - on one of the sentences this rule was
+# written for.
+_CASE_CUSTOMER_RE = re.compile(
+    r"\b(?:a|one|another|the|our)\s+(?:[\w-]+\s+){0,5}?" + _CUSTOMER_NOUNS + r"\b",
+    re.IGNORECASE,
+)
+# Article-less geographic form: "in South American water treatment plants" names
+# a customer set by region with no article at all.
+_CASE_REGION_CUSTOMER_RE = re.compile(
+    r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\s+(?:[\w-]+\s+){0,3}?" + _CUSTOMER_NOUNS + r"\b",
+)
+_CASE_PLACE_RE = re.compile(
+    r"\bin\s+(?:the\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?(?:,\s*[A-Z][a-z]+)?)")
+_CASE_OUTCOME_RE = re.compile(
+    r"\b(?:cost|saved|lost|billed|charged)\s+(?:them|the\s+(?:plant|client|customer|mill|"
+    r"factory|operator))\b|\b(?:they|the\s+plant|the\s+client|the\s+customer)\s+"
+    r"(?:lost|saved|spent|paid)\b",
+    re.IGNORECASE,
+)
+
+
+# Capitalised words that are not people. Without this "Our engineer Monday
+# routine covers seal checks" reported a colleague called Monday.
+_NOT_A_NAME = {
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+    "January", "February", "March", "April", "May", "June", "July", "August",
+    "September", "October", "November", "December",
+    "European", "European", "Chinese", "German", "Italian", "Japanese", "Asian",
+    "The", "This", "That", "Their", "These", "Those", "When", "While", "After",
+}
+
+
+def invented_case_studies(text: str) -> List[str]:
+    """Sentences that narrate a specific customer engagement as fact.
+
+    Not a ban on stories - a ban on inventing the PARTIES. A mechanism described
+    generically is true and useful; a named engineer, a located customer or a
+    costed outcome is a claim about work that was never done.
+    """
+    hits: List[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", text):
+        person = _CASE_PERSON_RE.search(sentence)
+        if person and person.group(1) not in _NOT_A_NAME:
+            hits.append(f"a named colleague ('{person.group(1)}')")
+        if _CASE_OUTCOME_RE.search(sentence):
+            hits.append("a cost or saving attributed to a specific customer")
+        if _CASE_CUSTOMER_RE.search(sentence):
+            place = _CASE_PLACE_RE.search(sentence)
+            if place:
+                hits.append(f"an invented customer located in '{place.group(1)}'")
+        region = _CASE_REGION_CUSTOMER_RE.search(sentence)
+        if region:
+            hits.append(f"a customer set named by region ('{region.group(0).strip()}')")
     return sorted(set(hits))
 
 
@@ -675,6 +767,18 @@ def post_issues(
                 + ", ".join(f"'{f}'" for f in framing)
                 + ". Attribute it to the outlet that said it and give the other "
                 "side, or drop it"
+            )
+
+    if voice.ban_invented_cases and not is_holiday:
+        cases = invented_case_studies(whole)
+        if cases:
+            issues.append(
+                "narrates a customer engagement that did not happen - "
+                + ", ".join(cases)
+                + ". Describe the MECHANISM generically instead: what conditions "
+                "cause the failure, how it progresses, what it costs in general "
+                "terms. Name no customer, no country and no colleague, and "
+                "attribute no figure to a specific job"
             )
 
     if voice.competitors and not is_holiday:

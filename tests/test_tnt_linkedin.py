@@ -353,4 +353,62 @@ for _n, _want in (('Myth Busters', False), ('When Bearings Fail', False),
 t.check('LUOYANG: an evergreen pillar KEEPS its phrases so it can be flipped back',
         all(_p.get('news_queries') for _p in _by_name.values()))
 
+# ============================================================================
+# DESCRIBE THE MECHANISM, DO NOT INVENT THE CUSTOMER (2026-09-14)
+# ============================================================================
+# A ten-pillar dry run found TNT narrating customer work that never happened:
+#   "Our TNT Motion engineer, David, visited a client in Saudi Arabia last year"
+#   "A major steel mill in Alexandria, Egypt... failures every 3 months"
+#   "An Eastern European food processing plant... cost over EUR 18,000"
+# A named colleague who may not exist and customers that certainly do not. The
+# invented-figures rule only polices NUMBERS, so the stories sailed through.
+#
+# These pillars are called "Forensic Stories from the Field" - narrative is the
+# point. What is true and useful is the MECHANISM; naming a country, a customer
+# or a colleague turns an explanation into a testimonial for work never done.
+from linkedin_generation.social.post_quality import invented_case_studies
+
+_INVENTED = [
+    'Our TNT Motion engineer, David, visited a client in Saudi Arabia last year.',
+    'A major steel mill in Alexandria, Egypt, faced critical bearing failures.',
+    'The plant lost two full shifts of production. This cost over EUR 18,000.',
+    'Our engineers at TNT Motion see this often in South American water treatment plants.',
+    'A major Eastern European food processing plant faced a complete shutdown.',
+]
+_LEGITIMATE = [
+    'In a washdown environment, moisture works past a worn lip seal and the race corrodes.',
+    'A worn pull stud can lose up to 30% of its drawbar clamping force.',
+    'High-duty pump cycles build internal heat inside sealed bearings.',
+    'Replacing a EUR 40 bearing three times a year is EUR 120, plus three shutdowns.',
+    'Chinese automakers will use 4% of European car production capacity by 2030.',
+    'Ceramic balls are 60% lighter than steel, cutting friction heat.',
+    'Sealed bearings in wet environments need seal inspection on a set interval.',
+]
+for _t in _INVENTED:
+    t.check(f'CASE: flagged - "{_t[:46]}..."', bool(invented_case_studies(_t)))
+for _t in _LEGITIMATE:
+    t.check(f'CASE: clean - "{_t[:46]}..."', not invented_case_studies(_t))
+
+t.check('CASE: a named colleague is called out specifically',
+        any('named colleague' in h for h in invented_case_studies(
+            'Our engineer, David, found the fault.')))
+t.check('CASE: a cost pinned on a customer is called out specifically',
+        any('cost or saving' in h for h in invented_case_studies(
+            'It cost them EUR 18,000 in lost product.')))
+
+# Scoped by voice: Seta DELIBERATELY describes parties by what they are, backed
+# by the real mandate record and policed by the confidentiality gate. Applying
+# this there would block its intended output.
+t.check('CASE: the rule is a voice flag, not global',
+        TNT_VOICE.ban_invented_cases and not SETA_VOICE.ban_invented_cases)
+t.check('CASE: the gate reports it for the retry',
+        any('did not happen' in i for i in post_issues(
+            {'headline': 'H',
+             'body': 'A major steel mill in Alexandria, Egypt, lost three shifts.',
+             'cta': 'Call us. And you?'}, TNT_VOICE)))
+t.check('CASE: the prompt shows what to write INSTEAD, not just what to avoid',
+        'DESCRIBE THE MECHANISM' in _cg and 'washdown environment' in _cg)
+t.check('CASE: a real case from the supplied material may still be used',
+        'use it exactly as given' in _cg)
+
 sys.exit(t.summary())
