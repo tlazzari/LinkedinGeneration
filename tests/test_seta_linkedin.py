@@ -1227,4 +1227,40 @@ if _soc_lib_p.exists():
     t.check('RULE: suggestions aim at a level where trade press publishes',
             'collet chuck tooling' in _sl and 'INDUSTRY or the MARKET' in _sl)
 
+# ============================================================================
+# NEWS IS A PER-PILLAR CHOICE, NOT A CONSTANT (2026-09-13)
+# ============================================================================
+# Forcing news onto an evergreen subject is what produced TNT's bolt-on: a post
+# that opened on a bearing maker's stock listing and then argued about bearing
+# cost, with no link between the two. The same shape was present in both other
+# brands and had to be checked rather than assumed:
+#   - Seta had all four pillars news-led, which IS defensible (its material is
+#     deal news), but it lacked the causal-connection rule entirely.
+#   - Bolla was worse: 'use_news_search' => true was HARDCODED in the CRM, so a
+#     tenant whose subject has no press could not turn it off at all.
+t.check('RULE: Seta requires a causal link, not a decorative one',
+        'CONNECTION MUST BE REAL' in gen_src and 'decoration, not a connection' in gen_src)
+t.check('RULE: Seta is told no news beats bolted-on news',
+        'worse than one with no news in it' in gen_src)
+
+_soc_lib2 = _P('/var/www/tntbearings.com/social-standalone/lib.php')
+if _soc_lib2.exists():
+    _sl2 = _soc_lib2.read_text()
+    _se2 = _P('/var/www/tntbearings.com/social-standalone/edit.php').read_text()
+    t.check('BOLLA: news is no longer hardcoded true for every tenant subject',
+            "'use_news_search' => true," not in _sl2)
+    t.check('BOLLA: a tenant can turn news off per subject',
+            "name=\"pillar_news[" in _se2 and "pillar_news" in _se2)
+    t.check('BOLLA: the page explains WHEN to turn it off',
+            'do not change with the news' in _se2)
+    t.check('BOLLA: suggestions decide news-vs-evergreen per subject',
+            'news_led' in _sl2 and 'Be honest' in _sl2)
+    t.check('BOLLA: the default is still news-led - most subjects do have press',
+            "!isset($p['use_news_search']) || (bool) $p['use_news_search']" in _sl2)
+
+# The pipeline must honour a tenant that said no.
+_cfg_src = (PKG_DIR / 'social' / 'brand_store.py').read_text()
+t.check('BOLLA: the pipeline respects a tenant pillar that opted out of news',
+        'p.get("use_news_search", True)' in _cfg_src)
+
 sys.exit(t.summary())
