@@ -308,15 +308,32 @@ def search_news_serpapi(
         return []
     base = os.getenv("SERP_API_BASE", "https://serpapi.com").rstrip("/")
     hl, gl = ("zh-cn", "cn") if lang == "zh" else ("en", "us")
+    # SerpAPI reads time out intermittently - 3 of 12 queries in one probe on
+    # 2026-09-13, and once it made the suite's LIVE provider check fail for no
+    # real reason. A flaky test in the nightly gate is worse than no test: it
+    # teaches whoever sees it to ignore a red run. One retry clears it, and it
+    # also stops production silently losing a query's results.
+    data = None
+    for attempt in (1, 2):
+        try:
+            response = requests.get(
+                f"{base}/search",
+                params={"engine": "google", "tbm": "nws", "q": query, "tbs": max_age,
+                        "hl": hl, "gl": gl, "num": num_results, "api_key": api_key},
+                timeout=60,
+            )
+            response.raise_for_status()
+            data = response.json()
+            break
+        except requests.Timeout:
+            logger.info("SerpAPI timed out on '%s' (attempt %d) - retrying", query, attempt)
+        except Exception as exc:
+            logger.warning(f"SerpAPI news search failed for '{query}': {exc}")
+            return []
+    if data is None:
+        logger.warning("SerpAPI timed out twice on '%s' - giving up on this query", query)
+        return []
     try:
-        response = requests.get(
-            f"{base}/search",
-            params={"engine": "google", "tbm": "nws", "q": query, "tbs": max_age,
-                    "hl": hl, "gl": gl, "num": num_results, "api_key": api_key},
-            timeout=45,
-        )
-        response.raise_for_status()
-        data = response.json()
         if data.get("error"):
             logger.warning(f"SerpAPI returned an error for '{query}': {data['error']}")
             return []

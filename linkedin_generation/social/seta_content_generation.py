@@ -134,8 +134,15 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         # for failure to do so." So this one refuses: one focused retry naming the
         # exact problem, and if that does not clear it, NO POST TODAY. A missed
         # Tuesday costs nothing; a named counterparty under NDA is a lawsuit.
+        # The fetched articles are already published, so anyone they name is
+        # public and may be named back. Without this the post cannot refer to the
+        # firm or official its own source quotes.
+        public_context = "\n".join(
+            [news_context] + [f"{a.title} {a.summary} {a.source}" for a in news_articles]
+        )
         conf = confidentiality_issues(
-            " ".join(str(payload.get(k, "")) for k in ("headline", "body", "cta"))
+            " ".join(str(payload.get(k, "")) for k in ("headline", "body", "cta")),
+            public_context=public_context,
         )
         if conf:
             logger.error("CONFIDENTIALITY: %s - regenerating once", "; ".join(conf))
@@ -159,7 +166,8 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                 SETA_VOICE,
             )
             still = confidentiality_issues(
-                " ".join(str(safe_payload.get(k, "")) for k in ("headline", "body", "cta"))
+                " ".join(str(safe_payload.get(k, "")) for k in ("headline", "body", "cta")),
+                public_context=public_context,
             )
             if still:
                 logger.error(

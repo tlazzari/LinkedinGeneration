@@ -1367,4 +1367,27 @@ t.check('CALC: a derived engineering figure is allowed',
         unsupported_statistics('A 20 mm bore at 3000 rpm gives roughly 3.1 m/s surface speed.',
                                '') == [])
 
+# ── PUBLIC FIGURES AND PUBLIC DATA ARE FINE TO PUBLISH (2026-09-13) ────────
+# Tom's rule, given after the gate blocked a post for naming KPMG and Global PMI
+# Partners - both simply quoted in the Chinese article the post was built on.
+# A name printed in today's press is public by definition; repeating it breaches
+# nothing, and blocking it forces the post to talk around its own source.
+_public_src = ('KPMG partner Li Yao said Chinese firms are entering a 3.0 phase. '
+               'Global PMI Partners advised on integration.')
+t.check('PUBLIC: a firm quoted in the fetched article may be named',
+        is_publishable('KPMG says Chinese firms are in a 3.0 phase.',
+                       public_context=_public_src))
+t.check('PUBLIC: the same name with NO published source is still blocked',
+        not is_publishable('KPMG says Chinese firms are in a 3.0 phase.'))
+t.check('PUBLIC: an NDA counterparty is NOT laundered by an unrelated source',
+        confidentiality_issues('We advised Muster Industrie GmbH.',
+                               public_context=_public_src))
+t.check('PUBLIC: a confidential deck figure stays blocked even if the press prints one',
+        confidentiality_issues('It closed at 11x EBITDA.',
+                               public_context='a deal closed at 11x EBITDA'))
+t.check('PUBLIC: the generator passes the fetched articles to the gate',
+        'public_context=public_context' in gen_src)
+t.check('PUBLIC: the retry check gets the same context, or it would block what it just allowed',
+        gen_src.count('public_context=public_context') >= 2)
+
 sys.exit(t.summary())

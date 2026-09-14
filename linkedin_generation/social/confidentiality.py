@@ -192,9 +192,27 @@ def _is_public(name: str) -> bool:
     return any(p.lower() in low or low in p.lower() for p in PUBLIC_DEALS)
 
 
-def confidentiality_issues(text: str) -> List[str]:
-    """Every reason this text must not be published. Empty means clear."""
+def confidentiality_issues(text: str, public_context: str = "") -> List[str]:
+    """Every reason this text must not be published. Empty means clear.
+
+    `public_context` is material that is ALREADY PUBLISHED - the news articles
+    fetched for this post. Tom, 2026-09-13: "public figures and public data are
+    fine to publish." A name printed in today's press is public by definition, so
+    naming it repeats what the outlet already said and breaches nothing.
+
+    This matters in practice: the first live run blocked a post for naming KPMG
+    and Global PMI Partners, both of which were simply quoted in the Chinese
+    article the post was built on. Blocking those forces the post to talk around
+    its own source, and costs a whole regeneration.
+
+    The confidential-outcome patterns are NOT waived by this - a deck figure does
+    not become publishable because a similar number appears in the press.
+    """
     issues: List[str] = []
+    public = (public_context or "").lower()
+
+    def _is_already_public(name: str) -> bool:
+        return bool(name) and name.lower() in public
     known = _known_names()
     if not known["loaded"]:
         return ["the counterparty list could not be loaded - refusing to clear this post"]
@@ -205,6 +223,8 @@ def confidentiality_issues(text: str) -> List[str]:
         if len(org) < 4 or _is_public(org):
             continue
         if any(o.lower() == org.lower() for o in OWN_NAMES):
+            continue
+        if _is_already_public(org):
             continue
         if " " not in org and org.lower() in _GENERIC_ORG_WORDS:
             continue
@@ -224,6 +244,8 @@ def confidentiality_issues(text: str) -> List[str]:
         _all_dict = bool(_p_tokens) and _dictionary_words() and all(
             t in _dictionary_words() for t in _p_tokens)
         if any(o.lower() == person.lower() for o in OWN_NAMES) or _all_dict:
+            continue
+        if _is_already_public(person):
             continue
         parts = [p for p in person.split() if len(p) > 3]
         if len(parts) < 2:
@@ -256,14 +278,16 @@ def confidentiality_issues(text: str) -> List[str]:
         while tokens and tokens[0].lower() in _LEAD_IN:
             tokens.pop(0)          # drop "We advised" etc. so the report names the company
         candidate = " ".join(tokens).strip()
+        if _is_already_public(candidate):
+            continue
         if len(tokens) >= 2 and not _is_public(candidate):
             issues.append(f"names what looks like a specific company: '{candidate}'")
 
     return sorted(set(issues))
 
 
-def is_publishable(text: str) -> bool:
-    return not confidentiality_issues(text)
+def is_publishable(text: str, public_context: str = "") -> bool:
+    return not confidentiality_issues(text, public_context)
 
 
 __all__ = [
