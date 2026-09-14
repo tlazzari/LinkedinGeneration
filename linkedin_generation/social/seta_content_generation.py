@@ -212,9 +212,9 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         # there would put the generic boardroom back on screen, so reuse the image
         # subject instead: same scene, in motion. Only if BOTH are missing or
         # unsafe does the vetted YAML prompt take over.
-        video_subject = payload.get("video_prompt") or payload.get("image_prompt")
         video_prompt = compose_media_prompt(
-            subject=video_subject,
+            subject=payload.get("video_prompt"),
+            fallback_subject=payload.get("image_prompt"),
             house_prompt=pillar.video_prompt,
             kind="video",
         )

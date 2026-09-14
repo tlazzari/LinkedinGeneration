@@ -73,6 +73,7 @@ def compose_media_prompt(
     subject: Optional[str],
     house_prompt: Optional[str],
     kind: str = "image",
+    fallback_subject: Optional[str] = None,
 ) -> str:
     """Subject from the post + house look from YAML + rules that cannot be dropped.
 
@@ -83,13 +84,21 @@ def compose_media_prompt(
     rules = HOUSE_RULES_VIDEO if kind == "video" else HOUSE_RULES_IMAGE
     house = (house_prompt or "").strip()
 
-    if not is_safe_subject(subject or ""):
-        # Unusable subject: fall back to the vetted YAML prompt, but still append
-        # the rules in case the YAML predates them.
+    chosen = subject if is_safe_subject(subject or "") else None
+    if chosen is None and is_safe_subject(fallback_subject or ""):
+        # The model's video_prompt was unusable but its image_prompt describes the
+        # same post. Reuse that rather than dropping to the YAML - found on a dry
+        # run 2026-09-14, where M&A Insights got the fixed boardroom clip while its
+        # IMAGE was a story-specific logistics warehouse. Falling all the way back
+        # when a good subject was sitting right there is the worst of both.
+        chosen = fallback_subject
+    if chosen is None:
+        # Nothing usable: the vetted YAML prompt, with the rules appended in case
+        # the YAML predates them.
         base = house or "Professionals at work in an industrial or advisory setting."
         return f"{base} {rules}".strip()
 
-    cleaned = strip_house_boilerplate(subject or "")
+    cleaned = strip_house_boilerplate(chosen)
     return f"{cleaned} {rules}".strip()
 
 

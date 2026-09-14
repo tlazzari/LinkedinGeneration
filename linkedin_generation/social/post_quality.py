@@ -376,10 +376,23 @@ _SELF_COUNT_RE = re.compile(
 PUBLISHED_AGGREGATES = {"10", "150"}
 
 
+# The count must be attributed to US. A dry run on 2026-09-14 flagged "130
+# European Auto Parts Acquisitions" - China's acquisitions, straight out of the
+# news, nothing to do with the firm's record. Market data must pass untouched or
+# the rule blocks the very reporting the post is built on.
+_OURS_RE = re.compile(
+    r"\b(we|our|us|the firm|this firm|my)\b", re.IGNORECASE)
+
+
 def self_deal_counts(text: str) -> List[str]:
-    """Numbers the post puts on the firm's own deal record."""
+    """Numbers the post puts on the FIRM'S OWN deal record."""
+    sentences = re.split(r"(?<=[.!?])\s+", text)
     hits: List[str] = []
     for m in _SELF_COUNT_RE.finditer(text):
+        sentence = next(
+            (x for x in sentences if m.group(0) in x), text)
+        if not _OURS_RE.search(sentence):
+            continue
         value = m.group(1) or m.group(2)
         if not value or value in PUBLISHED_AGGREGATES:
             continue
@@ -392,7 +405,8 @@ def self_deal_counts(text: str) -> List[str]:
 
 # Vague attributions that imply a source the pipeline never fetched.
 VAGUE_SOURCE_PATTERNS = [
-    r"\brecent (?:reports?|data|studies|analysis)\b",
+    # "analyses" (plural) slipped past the singular form on a dry run.
+    r"\brecent (?:reports?|data|studies|analys[ie]s)\b",
     r"\b(?:leading |industry |market )?reports? (?:indicate|show|suggest|confirm)\b",
     r"\bdata (?:from|indicates?|shows?|suggests?)\b",
     r"\bstudies show\b",

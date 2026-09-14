@@ -217,8 +217,12 @@ t.check('RULE: video prompts still carry 16:9',
 t.check('RULE: an empty subject falls back rather than producing an empty prompt',
         len(compose_media_prompt(subject=None, house_prompt=None, kind='image')) > 60)
 
-t.check('RULE: a missing video_prompt reuses the image subject, not the generic YAML',
-        'payload.get("video_prompt") or payload.get("image_prompt")' in gen_src)
+# Rewritten 2026-09-14: the fallback moved from an inline `or` to an
+# explicit fallback_subject= parameter, which also covers the case the
+# inline form missed - a video_prompt that is PRESENT but unusable, which
+# used to drop past the image subject straight to the YAML boardroom.
+t.check('RULE: a missing or unusable video_prompt reuses the image subject, not the YAML',
+        'fallback_subject=payload.get("image_prompt")' in gen_src)
 t.check('RULE: the scheduler prefers the post-specific video prompt over the YAML',
         'post.video_prompt or pillar.video_prompt' in sched_src)
 t.check('RULE: the prompt tells the model a boardroom handshake is the wrong default',
@@ -1215,8 +1219,10 @@ t.check('RULE: TNT media carries the mandate appended in code',
         'house_prompt=pillar.image_prompt' in _tnt_src)
 t.check('RULE: TNT is told the media must show THIS post, not generic industry shots',
         'SUBJECT OF THIS POST' in _tnt_src)
-t.check('RULE: a missing TNT video_prompt reuses the image subject',
-        'payload.get("video_prompt") or payload.get("image_prompt")' in _tnt_src)
+# Rewritten 2026-09-14 with its Seta twin: the inline `or` missed a video_prompt
+# that is PRESENT but unusable, which dropped past the image subject to the YAML.
+t.check('RULE: a missing or unusable TNT video_prompt reuses the image subject',
+        'fallback_subject=payload.get("image_prompt")' in _tnt_src)
 
 # --- the tenant can see, before saving, whether its subject has any press ---
 _soc_lib_p = _P('/var/www/tntbearings.com/social-standalone/lib.php')
@@ -1534,5 +1540,61 @@ t.check('MEDIA: a negotiation post may still show a negotiation',
         or 'literally\\n' in gen_src or 'about a signing' in gen_src)
 t.check('MEDIA: the evergreen branch shows the industry, not an office',
         'shows that workshop and the two generations in it, not an office' in gen_src)
+
+# ── FIVE BUGS FOUND BY RUNNING ALL TEN PILLARS (2026-09-14) ────────────────
+# A dry run across every Seta and TNT pillar surfaced these. None was visible
+# from reading the code; each needed a real generation.
+from linkedin_generation.social.media_prompts import compose_media_prompt as _cmp
+from linkedin_generation.social.news_search import (
+    is_promo, PROMO_MARKERS, state_affiliation as _sa, _rank_key as _rk,
+)
+from linkedin_generation.social.post_quality import self_deal_counts as _sdc, vague_source_hits
+
+# 1. M&A Insights got the fixed YAML boardroom clip while its IMAGE was
+#    story-specific: the model's video_prompt was unusable, and the fallback went
+#    straight past a perfectly good image subject to the YAML.
+_out = _cmp(subject='An aerial drone shot of the city skyline',
+            fallback_subject='Two engineers inspecting a robotic assembly line in a European plant',
+            house_prompt='Cinematic boardroom advisory session.', kind='video')
+t.check('DRY: an unusable video subject falls back to the IMAGE subject, not the YAML',
+        'robotic assembly line' in _out and 'boardroom' not in _out.lower())
+t.check('DRY: only when BOTH are unusable does the YAML prompt take over',
+        'boardroom' in _cmp(subject='city skyline', fallback_subject='aerial drone shot',
+                            house_prompt='Cinematic boardroom advisory session.',
+                            kind='video').lower())
+t.check('DRY: both generators pass the image subject as the fallback',
+        'fallback_subject=payload.get("image_prompt")' in gen_src
+        and 'fallback_subject=payload.get("image_prompt")'
+        in (PKG_DIR / 'social' / 'content_generation.py').read_text())
+
+# 2. "130 European Auto Parts Acquisitions" - China's, from the news - was
+#    flagged as the firm counting its own mandates.
+t.check('DRY: market data about someone else is not "counting our own mandates"',
+        not _sdc('China has acquired over 130 European auto parts companies.'))
+t.check('DRY: a count the post claims as OURS is still caught',
+        _sdc('Our 5 sell-side deals in automotive show the pattern.'))
+
+# 3. State outlets used unlabelled as anchors.
+t.check('DRY: The Paper is labelled as state media', _sa('https://www.thepaper.cn/x'))
+t.check('DRY: China Industry News is labelled', _sa('https://www.cinn.cn/x'))
+
+# 4. Portal aggregators were anchoring posts - they republish, they do not report.
+t.check('DRY: Tencent News ranks below real outlets',
+        _rk({'url': 'https://news.qq.com/a', 'age_days': 0, 'title': 't'})
+        > _rk({'url': 'https://www.cls.cn/detail/1', 'age_days': 30, 'title': 't'}))
+
+# 5. Vendor marketing and conference recaps were being used as news.
+t.check('DRY: a conference recap is not news',
+        is_promo('【广西峰会精彩回顾之孛辰篇】单瓦裱纸一体化生产线'))
+t.check('DRY: a vendor press release is not news',
+        is_promo('蝉联双冠，邦德激光以颠覆性创新持续领跑'))
+t.check('DRY: real trade news is untouched',
+        not is_promo('多家海外巨头订单创历史新高 全球机床行业出现新一轮上行周期'))
+t.check('DRY: promo is DROPPED at selection, not merely demoted',
+        'Dropping vendor marketing' in (PKG_DIR / 'social' / 'news_search.py').read_text())
+
+# 6. "Recent analyses" (plural) slipped past the vague-source check.
+t.check('DRY: plural "analyses" is caught like the singular',
+        vague_source_hits('Recent analyses from early 2026 show a clear shift.'))
 
 sys.exit(t.summary())

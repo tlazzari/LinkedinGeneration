@@ -142,6 +142,9 @@ DEMOTED_SOURCES = [
     "sohu.com", "163.com", "baijiahao", "toutiao", "ifeng.com",
     "einpresswire.com", "prnewswire", "businesswire", "globenewswire",
     "openpr.com", "accesswire", "medium.com", "linkedin.com", "reddit.com",
+    # Portal aggregators - they republish, they do not report. Tencent News was
+    # the anchor of a Market Intelligence dry run on 2026-09-14.
+    "news.qq.com", "qq.com", "sohu.com", "ifeng.com", "k.sina.com.cn",
     # Market-research report mills. Checking "bearing manufacturer industry" on
     # 2026-09-13 returned "Cold Heading Quality Wire Market Share Analysis",
     # "Wind Power Bearing Market Overview" and "Tool Holder Market Size, Share,
@@ -181,6 +184,23 @@ PREFERRED_TRADE = [
 # vocabulary: a probe for 机床 行业 市场 on 2026-09-13 returned "果博APP怎么样产业化
 # 成果发布" and "库博体育怎么让制造业效益可见" in the top ten. Ranking them last is
 # not enough, because on a thin topic last still means published.
+# Chinese corporate marketing dressed as news. A dry run anchored a TNT post on
+# "【广西峰会精彩回顾之孛辰篇】..." and cited "邦德激光以'颠覆性创新'持续领跑" - a
+# conference recap and a vendor press release. Neither is an event; both read as
+# an advert for someone else.
+PROMO_MARKERS = [
+    "精彩回顾", "持续领跑", "颠覆性创新", "重磅发布", "荣获", "斩获",
+    "强势登陆", "圆满落幕", "闪耀", "引领行业", "赋能", "新范式",
+    "award-winning", "proud to announce", "we are excited",
+]
+
+
+def is_promo(title: str) -> bool:
+    """True for vendor marketing and conference recaps posing as news."""
+    t = (title or "")
+    return any(m in t for m in PROMO_MARKERS)
+
+
 SPAM_MARKERS = [
     "果博", "库博", "太阳城", "威尼斯人", "百家乐", "娱乐城", "博彩", "彩票",
     "开户", "赌场", "下注", "投注", "澳门银河", "新葡京",
@@ -224,6 +244,11 @@ STATE_AFFILIATED = {
     "yicai.com": "Yicai (Shanghai state-owned media group)",
     "cs.com.cn": "China Securities Journal (Xinhua group)",
     "sc.chinanews.com.cn": "China News Service (state-run)",
+    # Found on a dry run 2026-09-14: both were being used as anchors unlabelled.
+    "thepaper.cn": "The Paper 澎湃 (Shanghai state media group)",
+    "cnindustry": "China Industry News (ministry-affiliated)",
+    "cinn.cn": "China Industry News (ministry-affiliated)",
+    "bjnews.com.cn": "Beijing News (Beijing municipal party group)",
     # Non-Chinese state outlets, same rule
     "rt.com": "RT (Russian state)",
     "sputniknews": "Sputnik (Russian state)",
@@ -837,6 +862,10 @@ def search_news_for_pillar(
             # a competitor's news advertises the competitor. Both are dropped at
             # SELECTION, not argued with in the prompt: an article that should not
             # be the anchor should never be offered as one.
+            if is_promo(title_raw):
+                logger.info("Dropping vendor marketing / conference recap: %s",
+                            title_raw[:60])
+                continue
             if avoid_finance and is_corporate_finance(title_raw):
                 logger.info("Dropping equity-market story (no technical hook): %s",
                             title_raw[:60])
@@ -998,6 +1027,8 @@ __all__ = [
     "providers_reachable",
     "is_spam",
     "is_corporate_finance",
+    "is_promo",
+    "PROMO_MARKERS",
     "SPAM_MARKERS",
     "build_news_context",
     "fetch_article_preview_image",

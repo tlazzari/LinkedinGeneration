@@ -175,7 +175,8 @@ class LinkedInPostGenerator(BaseContentGenerator):
             kind="image",
         )
         video_prompt = compose_media_prompt(
-            subject=payload.get("video_prompt") or payload.get("image_prompt"),
+            subject=payload.get("video_prompt"),
+            fallback_subject=payload.get("image_prompt"),
             house_prompt=pillar.video_prompt
                          or f"Slow-motion footage showing {pillar.angle.lower()} in operation",
             kind="video",
