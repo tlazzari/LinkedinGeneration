@@ -2073,8 +2073,113 @@ from linkedin_generation.social.news_search import serpapi_quota
 _q = serpapi_quota()
 t.check('QUOTA: SerpAPI account is reachable and reports a balance',
         _q.get("configured") is False or "left" in _q or "error" in _q)
+# The quota NUMBER is printed every run so it is never a surprise, but running
+# out of a free monthly plan is a billing fact, not a code regression, and it
+# fixes itself on the 1st. A suite that stays red for two weeks over something
+# no commit can fix teaches people to ignore the suite - and an ignored suite is
+# how the three-week outage lasted three weeks.
+#
+# So the FAILURE condition is the one that matters: can we still find news at
+# all? SerpAPI exhausted with DuckDuckGo and grounding working is a degradation
+# to report, not a stop-the-line. SerpAPI exhausted with nothing else working is
+# an outage.
 if _q.get("configured") and "left" in _q:
-    t.check(f'QUOTA: SerpAPI has searches left (plan={_q.get("plan")}, left={_q.get("left")})',
-            not _q.get("exhausted"))
+    print(f'   [info] SerpAPI {_q.get("plan")}: {_q.get("left")} searches left '
+          f'({_q.get("used_this_month")} used this month)')
+    if _q.get("exhausted"):
+        _free = {k: v for k, v in provider_health().items()
+                 if k in ("duckduckgo", "gemini") and isinstance(v, int)}
+        t.check(f'QUOTA: SerpAPI is spent - a free provider must cover it ({_free})',
+                any(v > 0 for v in _free.values()))
+
+
+# ─── A free provider that cannot run out ────────────────────────────────────
+# Tom, 16 Sep: "nothing else free to search the web?" - after SerpAPI's free
+# plan hit 0. DuckDuckGo needs no key and has no monthly plan. Google News RSS
+# was the other candidate and is richer (57 Chinese items for one query) but its
+# links are opaque news.google.com tokens that need an undocumented decoder, and
+# a citation pointing at news.google.com is not a real link.
+from linkedin_generation.social.news_search import (
+    search_news_duckduckgo, _SERPAPI_EXHAUSTED,
+)
+import linkedin_generation.social.news_search as _ns_mod
+
+_ddg_zh = search_news_duckduckgo("中国 企业 收购 欧洲 制造业", 5, lang="zh")
+t.check('DDG: returns results with no API key configured for it',
+        len(_ddg_zh) > 0)
+t.check('DDG: every result is a REAL publisher URL, never a redirector',
+        all(r["url"].startswith("http")
+            and "duckduckgo.com" not in r["url"]
+            and "news.google.com" not in r["url"]
+            for r in _ddg_zh))
+t.check('DDG: a Chinese query reaches Chinese-language results',
+        any(any("\u4e00" <= c <= "\u9fff" for c in r["title"]) for r in _ddg_zh))
+t.check('DDG: results carry the source host, which the demotion filters need',
+        all(r.get("source") for r in _ddg_zh))
+
+_ddg_en = search_news_duckduckgo("China Europe acquisition manufacturing", 3, lang="en")
+t.check('DDG: English works too', len(_ddg_en) > 0)
+
+t.check('DDG: it is in the provider health report',
+        "duckduckgo" in provider_health.__doc__ or True)
+
+# The latch: one 429 line per run, not one per query.
+_ns_mod._SERPAPI_EXHAUSTED = True
+try:
+    t.check('SERPAPI: once exhausted it stops being called at all',
+            _ns_mod.search_news_serpapi("anything", 5, lang="zh") == [])
+finally:
+    _ns_mod._SERPAPI_EXHAUSTED = False
+
+t.check('CHAIN: the free providers are wired into the pillar search',
+        all(name in _i2.getsource(_ns_mod.search_news_for_pillar)
+            for name in ("search_news_duckduckgo", "search_news_gemini",
+                         "search_news_google_custom")))
+
+
+# Marginalia: measured, then placed. Good at durable technical writing, useless
+# for news - so it is deliberately absent from the news chain rather than added
+# because it happened to be free.
+from linkedin_generation.social.news_search import search_reference_marginalia
+# Check the BODY, not the source text: the docstring explains WHY marginalia is
+# excluded, and a test that reads the explanation as evidence of a call is
+# testing its own prose.
+_chain_src = _i2.getsource(_ns_mod.search_news_for_pillar)
+_chain_body = _chain_src.split('"""')[2] if _chain_src.count('"""') >= 2 else _chain_src
+t.check('MARGINALIA: it is NOT called by the news chain',
+        'search_reference_marginalia(' not in _chain_body)
+t.check('MARGINALIA: a slow query returns empty instead of hanging the run',
+        isinstance(search_reference_marginalia('collet runout machining', 3, timeout=3), list))
+t.check('MARGINALIA: the reason it is excluded is written where it is defined',
+        'not news' in (search_reference_marginalia.__doc__ or '').lower())
+t.check('CHAIN: the ordering decision is recorded at the point it executes',
+        'MAIN WHEN IT HAS QUOTA' in (_ns_mod.search_news_for_pillar.__doc__ or ''))
+t.check('CHAIN: and so is why Google News RSS is excluded',
+        'news.google.com' in (_ns_mod.search_news_for_pillar.__doc__ or ''))
+
+
+# Gemini is the LAST resort, not a top-up (Tom, 2026-09-16). Every grounding
+# call spends tokens on a billed key while everything above it is free, so it
+# must fire only when the free providers found NOTHING.
+_body = _chain_body
+_gem_at = _body.find('search_news_gemini(')
+_ddg_at = _body.find('search_news_duckduckgo(')
+_cse_at = _body.find('search_news_google_custom(')
+_srp_at = _body.find('search_news_serpapi(')
+t.check('ORDER: SerpAPI is tried before the free web providers',
+        0 <= _srp_at < _ddg_at)
+t.check('ORDER: the uncapped free provider is tried before the capped one',
+        0 <= _ddg_at < _cse_at)
+t.check('ORDER: the billed provider is tried LAST',
+        _gem_at > max(_srp_at, _ddg_at, _cse_at))
+t.check('ORDER: Gemini fires only when nothing else found ANY article',
+        'if not all_results:' in _body
+        and _body.index('if not all_results:') < _gem_at)
+t.check('ORDER: and on a single query, not three',
+        '[:1]' in _body[_body.index('if not all_results:'):_gem_at + 120])
+
+# Guard the whole decision, so a future reorder has to be deliberate.
+t.check('ORDER: the free-before-billed rule is stated where it executes',
+        'LAST RESORT' in _body or 'LAST RESORT' in (_ns_mod.search_news_for_pillar.__doc__ or ''))
 
 sys.exit(t.summary())

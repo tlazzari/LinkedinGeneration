@@ -9,11 +9,17 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import List, Optional, Sequence
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
+import html as html_mod
 import requests
 
 logger = logging.getLogger(__name__)
+
+_DDG_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+_DDG_RESULT = re.compile(
+    r'class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S
+)
 
 # News search queries by pillar - dynamically include current year
 def get_pillar_search_queries():
@@ -415,7 +421,16 @@ def search_news_serpapi(
         except requests.Timeout:
             logger.info("SerpAPI timed out on '%s' (attempt %d) - retrying", query, attempt)
         except Exception as exc:
-            logger.warning(f"SerpAPI news search failed for '{query}': {exc}")
+            # 429 means the monthly plan is spent. Latch it: every further call
+            # this run is a wasted round trip and a log line that buries the one
+            # message that matters. The flag is per process, so the next run
+            # tries again - a monthly reset must not need a restart to be seen.
+            if "429" in str(exc) or "Too Many Requests" in str(exc):
+                _SERPAPI_EXHAUSTED = True
+                globals()["_SERPAPI_EXHAUSTED"] = True
+                logger.warning("SerpAPI plan exhausted (429) - skipping it for this run")
+            else:
+                logger.warning(f"SerpAPI news search failed for '{query}': {exc}")
             return []
     if data is None:
         logger.warning("SerpAPI timed out twice on '%s' - giving up on this query", query)
@@ -533,6 +548,124 @@ def search_news_google_custom(query: str, num_results: int = 5) -> List[dict]:
         logger.error(f"Google Custom Search failed: {e}")
         return []
 
+
+
+def search_news_duckduckgo(query: str, num_results: int = 8,
+                           lang: str = "zh") -> List[dict]:
+    """Free web search with NO API key and no monthly plan to run out.
+
+    Added 2026-09-16, the day the SerpAPI free plan hit 0 and took the
+    Chinese-language search with it. The answer to "is there nothing else free"
+    is: this, and the Gemini grounding we already pay for. Everything else
+    either needs a signed-up key (Brave 2k/mo, Tavily 1k/mo, Serper) or is gone
+    (Bing's free tier retired).
+
+    Google News RSS was the other candidate and looked ideal - 57 Chinese items
+    for one query, no key, no quota - but since 2024 its links are opaque
+    `news.google.com/rss/articles/CBMi...` tokens that resolve only through an
+    undocumented batchexecute call. Verified here: following the redirect returns
+    the token URL itself and the payload carries no publisher URL. A post whose
+    citation points at news.google.com is not a real link, which is the entire
+    point of citing one, so it is not used.
+
+    DuckDuckGo's HTML endpoint returns the publisher URL directly. It is a WEB
+    search, not a news index, so results skew towards forums and aggregators -
+    the existing DEMOTED_SOURCES and is_spam() filters carry that weight, the
+    same as for any other provider.
+    """
+    region = "cn-zh" if lang == "zh" else "us-en"
+    try:
+        resp = requests.post(
+            "https://html.duckduckgo.com/html/",
+            data={
+                "q": query,
+                "kl": region,
+                "df": "m",          # past month, matching SerpAPI's tbs=qdr:m
+            },
+            headers={"User-Agent": _DDG_UA},
+            timeout=25,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        logger.warning("DuckDuckGo search failed for %r: %s", query, str(e)[:120])
+        return []
+
+    results: List[dict] = []
+    for m in _DDG_RESULT.finditer(resp.text):
+        url = html_mod.unescape(m.group(1))
+        title = html_mod.unescape(re.sub(r"<[^>]+>", "", m.group(2))).strip()
+        # DuckDuckGo wraps outbound links in its own redirector.
+        if "/l/?uddg=" in url or "uddg=" in url:
+            try:
+                url = unquote(url.split("uddg=")[1].split("&")[0])
+            except Exception:
+                continue
+        if not url.startswith("http") or not title:
+            continue
+        results.append({
+            "title": title,
+            "url": url,
+            "source": urlparse(url).netloc.replace("www.", ""),
+            "summary": "",
+            "provider": "duckduckgo",
+        })
+        if len(results) >= num_results:
+            break
+    logger.info("DuckDuckGo returned %d results for %r", len(results), query[:40])
+    return results
+
+
+def search_reference_marginalia(query: str, num_results: int = 5,
+                                timeout: int = 10) -> List[dict]:
+    """Independent-web search. Reference material, NOT news.
+
+    No key, no quota, no CAPTCHA - and deliberately kept OUT of the news chain.
+    Measured 2026-09-16 before deciding where it belongs:
+
+      "china europe acquisition"        -> StackExchange, Wikipedia
+      "bearing grease lubrication"      -> brighthubengineering, Wikipedia
+      "rolling element bearing fatigue" -> an academic fault-detection paper
+      "collet runout machining"         -> TIMED OUT after 45s
+
+    Marginalia's whole design is to demote commercial and SEO-optimised pages,
+    which is most of the news web - so it surfaces good durable writing and
+    almost no current events. It also has no Chinese coverage and no recency
+    filter, the two things the Seta pillars need most. Using it for news would
+    make posts worse, not better.
+
+    Where it genuinely helps is TNT's technical pillars, where the subject is
+    physics rather than this week. One query in three timed out, so the timeout
+    is short and failure returns [] - this may never be load-bearing.
+    """
+    from urllib.parse import quote
+    try:
+        r = requests.get(
+            "https://api.marginalia.nu/public/search/" + quote(query),
+            timeout=timeout,
+        )
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        logger.info("Marginalia unavailable for %r (%s) - skipping",
+                    query[:40], type(e).__name__)
+        return []
+
+    out: List[dict] = []
+    for item in (data.get("results") or [])[:num_results]:
+        url = item.get("url") or ""
+        title = (item.get("title") or "").strip()
+        if not url.startswith("http") or not title:
+            continue
+        out.append({
+            "title": title,
+            "url": url,
+            "source": urlparse(url).netloc.replace("www.", ""),
+            "summary": (item.get("description") or "")[:300],
+            "provider": "marginalia",
+        })
+    logger.info("Marginalia returned %d reference results for %r",
+                len(out), query[:40])
+    return out
 
 def search_news_gemini(query: str, num_results: int = 5) -> List[dict]:
     """Search news using Gemini with Google Search grounding."""
@@ -1013,14 +1146,46 @@ def search_news_for_pillar(
 ) -> List[NewsArticle]:
     """Find recent, specific news for a content pillar.
 
-    Order of providers (rewritten 2026-09-13):
-      1. SerpAPI Google News in CHINESE, restricted to the last month
-      2. SerpAPI Google News in English, same restriction
-      3. Gemini with Google Search grounding (redirects resolved)
-    The legacy Tavily / Serper / Google-Custom-Search providers stay as further
-    fallbacks but none of their keys are configured; before this rewrite they
-    were the ONLY fallbacks behind a Gemini call that always failed, so the
-    whole chain returned nothing for three weeks.
+    PROVIDER ORDER, and why each sits where it does (settled 2026-09-16, after
+    the SerpAPI free plan ran out and forced the question):
+
+      1. SerpAPI, Chinese then English - MAIN WHEN IT HAS QUOTA.
+         The only provider that is a true news index AND searches natively in
+         Chinese (hl=zh-cn, gl=cn) AND takes a real recency restriction
+         (tbs=qdr:m). Best result per query, so it goes first. Latches off after
+         a 429 rather than burning a round trip per query.
+
+      2. DuckDuckGo HTML - MAIN IN PRACTICE TODAY. No key, no quota, no daily
+         cap, and it returns the publisher URL directly with no redirect to
+         decode. Chinese queries reach Chinese sources. It is a WEB index rather
+         than a news one, so more forums and aggregators come back and the spam
+         and demotion filters do more work - but it costs nothing and cannot run
+         out, which is why it sits above the paid options.
+
+      3. Google Custom Search - DORMANT until GOOGLE_SEARCH_API_KEY exists.
+         GOOGLE_CSE_ID is already configured. Free but capped at 100 queries a
+         day, so it ranks below the uncapped provider and above the billed one.
+
+      4. Gemini with Google Search grounding - LAST RESORT ONLY. It works well
+         and handles Chinese properly, but every call spends tokens on a billed
+         key. It fires only when the free providers found NOTHING - not merely
+         fewer articles than we wanted, because paying to top up a thin result
+         is how a last resort becomes the default.
+
+    DELIBERATELY NOT IN THIS CHAIN:
+      - Google News RSS. Free, no key, and by far the richest (57 Chinese items
+        for one query) - but since 2024 its links are opaque
+        news.google.com/rss/articles/CBMi... tokens. Verified here: following the
+        redirect returns the token URL, and the payload contains no publisher
+        URL. A citation pointing at news.google.com is not a real link, and real
+        links are the point.
+      - Marginalia. Measured and kept for TNT's technical pillars instead - see
+        search_reference_marginalia(). It demotes commercial pages by design,
+        which is most of the news web, has no Chinese coverage and no recency
+        filter.
+      - Bing. Its free tier was retired; the endpoint returns 401.
+      - Brave / Tavily / Serper. Real free tiers, but all need a signed-up key,
+        so none is available today.
     """
     # A pillar's OWN topics win over the name-keyed table (2026-09-13). The table
     # is hardcoded China-Europe M&A, so without this every Bolla tenant that cloned
@@ -1102,26 +1267,39 @@ def search_news_for_pillar(
             if len(all_results) >= num_articles * 2:
                 break
 
-    # 3. Google Custom Search, when a key for it exists. Independent of SerpAPI,
-    #    so it carries the pillar when that plan is spent.
+    # 3. DuckDuckGo: free, keyless, and nothing to run out. Ahead of the other
+    #    free options because it has no daily cap at all and returns the
+    #    publisher URL directly, with no redirect to decode.
+    if len(all_results) < num_articles * 2:
+        for query in (zh_queries[:2] + en_queries[:1]):
+            absorb(search_news_duckduckgo(
+                query, num_results=8, lang="zh" if _is_chinese(query) else "en"))
+            if len(all_results) >= num_articles * 2:
+                break
+
+    # 4. Google Custom Search, once a key for it exists. Free but capped at 100
+    #    queries a day, so it goes after the uncapped one and before the billed
+    #    one.
     if len(all_results) < num_articles * 2:
         for query in (zh_queries + en_queries)[:2]:
             absorb(search_news_google_custom(query, num_results=8))
             if len(all_results) >= num_articles * 2:
                 break
 
-    # 4. Gemini with Google Search grounding.
-    #    This used to run only when EVERYTHING else returned nothing, and only on
-    #    an English query. When SerpAPI ran out of quota on 16 Sep that silently
-    #    cost us the Chinese-first search entirely - the whole reason SerpAPI is
-    #    first in the chain - while the pipeline still produced posts and looked
-    #    healthy. Grounding searches Chinese perfectly well when asked in Chinese,
-    #    so the CHINESE queries go first here too.
-    if len(all_results) < num_articles:
-        for query in (zh_queries + en_queries)[:3]:
+    # 5. Gemini with Google Search grounding - LAST RESORT (Tom, 2026-09-16).
+    #    It works well and searches Chinese properly, but every call spends
+    #    tokens on the billed Gemini key, and everything above is free. So it
+    #    runs only when the free providers between them could not find a single
+    #    usable article, and then on ONE query rather than three.
+    #
+    #    Note the condition: `not all_results`, not "fewer than we wanted". A
+    #    thin result from a free provider is still a result; paying to top it up
+    #    is how a last resort quietly becomes the default.
+    if not all_results:
+        logger.info("No free provider returned an article - falling back to "
+                    "grounded Gemini (billed)")
+        for query in (zh_queries + en_queries)[:1]:
             absorb(search_news_gemini(query, num_results=5))
-            if len(all_results) >= num_articles * 2:
-                break
 
     all_results.sort(key=_rank_key)
 
@@ -1225,6 +1403,10 @@ def provider_health(timeout_query: str = "中国 企业 收购 欧洲") -> dict:
         )
     except Exception as e:
         health["serpapi_en"] = f"ERROR: {e}"
+    try:
+        health["duckduckgo"] = len(search_news_duckduckgo(timeout_query, 5, lang="zh"))
+    except Exception as e:
+        health["duckduckgo"] = f"ERROR: {e}"
     try:
         health["gemini"] = len(search_news_gemini("China Europe M&A acquisition", 3))
     except Exception as e:
