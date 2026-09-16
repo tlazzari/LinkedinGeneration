@@ -370,6 +370,12 @@ def resolve_publisher_url(url: str, timeout: int = 15) -> str:
         return ""
 
 
+# Once the plan is spent every further call is a wasted round trip and three
+# lines of log noise per run. Latched per process, so the next run tries again -
+# the quota resets monthly and a restart must not be needed to notice.
+_SERPAPI_EXHAUSTED = False
+
+
 def search_news_serpapi(
     query: str, num_results: int = 8, lang: str = "zh", max_age: str = "qdr:m"
 ) -> List[dict]:
@@ -380,6 +386,9 @@ def search_news_serpapi(
     months old. `SERP_API_KEY` has been in /opt/linkedin/.env all along; the code
     was looking for `SERPER_API_KEY` (a different product) and so never used it.
     """
+    global _SERPAPI_EXHAUSTED
+    if _SERPAPI_EXHAUSTED:
+        return []
     api_key = os.getenv("SERP_API_KEY")
     if not api_key:
         logger.warning("SERP_API_KEY not set, skipping SerpAPI search")
@@ -494,8 +503,11 @@ def search_news_tavily(query: str, num_results: int = 5) -> List[dict]:
 
 def search_news_google_custom(query: str, num_results: int = 5) -> List[dict]:
     """Search news using Google Custom Search API."""
-    api_key = os.getenv("GOOGLE_CUSTOM_SEARCH_API_KEY")
-    cx = os.getenv("GOOGLE_CUSTOM_SEARCH_CX")
+    api_key = (os.getenv("GOOGLE_CUSTOM_SEARCH_API_KEY")
+               or os.getenv("GOOGLE_SEARCH_API_KEY"))
+    # GOOGLE_CSE_ID has been in .credentials.env all along; only the API key was
+    # ever missing. Accept either name so adding the key is the ONLY step needed.
+    cx = os.getenv("GOOGLE_CUSTOM_SEARCH_CX") or os.getenv("GOOGLE_CSE_ID")
     if not api_key or not cx:
         logger.warning("Google Custom Search not configured, skipping")
         return []
@@ -1090,10 +1102,26 @@ def search_news_for_pillar(
             if len(all_results) >= num_articles * 2:
                 break
 
-    # 3. Grounded Gemini as the last resort.
-    if not all_results:
-        for query in (en_queries or zh_queries)[:1]:
+    # 3. Google Custom Search, when a key for it exists. Independent of SerpAPI,
+    #    so it carries the pillar when that plan is spent.
+    if len(all_results) < num_articles * 2:
+        for query in (zh_queries + en_queries)[:2]:
+            absorb(search_news_google_custom(query, num_results=8))
+            if len(all_results) >= num_articles * 2:
+                break
+
+    # 4. Gemini with Google Search grounding.
+    #    This used to run only when EVERYTHING else returned nothing, and only on
+    #    an English query. When SerpAPI ran out of quota on 16 Sep that silently
+    #    cost us the Chinese-first search entirely - the whole reason SerpAPI is
+    #    first in the chain - while the pipeline still produced posts and looked
+    #    healthy. Grounding searches Chinese perfectly well when asked in Chinese,
+    #    so the CHINESE queries go first here too.
+    if len(all_results) < num_articles:
+        for query in (zh_queries + en_queries)[:3]:
             absorb(search_news_gemini(query, num_results=5))
+            if len(all_results) >= num_articles * 2:
+                break
 
     all_results.sort(key=_rank_key)
 

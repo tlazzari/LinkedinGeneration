@@ -897,8 +897,28 @@ if os.getenv('SERP_API_KEY') or os.getenv('GOOGLE_API_KEY'):
     _counts = {k: v for k, v in _health.items() if isinstance(v, int)}
     t.check('LIVE: at least one news provider returns articles right now (%s)' % _health,
             any(v > 0 for v in _counts.values()))
-    if os.getenv('SERP_API_KEY'):
-        t.check('LIVE: the Chinese-language search returns articles (%s)' % _health.get('serpapi_zh'),
+    # Test the CAPABILITY, not one provider. This asserted serpapi_zh > 0, so when
+    # the SerpAPI plan ran out on 16 Sep it went red even though Chinese-language
+    # search still worked through Gemini grounding. A provider being down is worth
+    # reporting - the quota check below does that - but the question this test
+    # should answer is "can we still find Chinese news?", and the answer was yes.
+    from linkedin_generation.social.news_search import (
+        search_news_for_pillar as _sfp, serpapi_quota as _sq,
+    )
+    _zh_live = _sfp(
+        'M&A Insights', num_articles=2,
+        queries=['中国 企业 收购 欧洲', '中欧 并购 制造业'],
+    )
+    _zh_hits = [a for a in _zh_live
+                if any('一' <= c <= '鿿' for c in (a.title or ''))]
+    t.check('LIVE: Chinese-language news is reachable by SOME provider (%d)' % len(_zh_hits),
+            bool(_zh_hits))
+    # Only assert SerpAPI itself works while it HAS quota. With the plan spent,
+    # the quota check below is the authoritative red - two failures for one root
+    # cause is noise, and noise is how a real signal gets ignored. If quota
+    # remains and it still returns nothing, that IS new and this fails.
+    if os.getenv('SERP_API_KEY') and not _sq().get('exhausted'):
+        t.check('LIVE-PROVIDER: SerpAPI Chinese search returns articles (%s)' % _health.get('serpapi_zh'),
                 isinstance(_health.get('serpapi_zh'), int) and _health['serpapi_zh'] > 0)
 
     from linkedin_generation.social.news_search import search_news_for_pillar
