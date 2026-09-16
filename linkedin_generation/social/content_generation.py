@@ -15,7 +15,16 @@ from .manual_knowledge import build_lubrication_installation_context, build_case
 from .base_content import GeneratedPost, BaseContentGenerator
 from .media_prompts import compose_media_prompt
 from .news_search import NewsArticle, build_news_context, search_news_for_pillar
-from .post_quality import PLAIN_ENGLISH_DIRECTIVE, TNT_VOICE, apply_fixes, post_issues
+from .post_quality import (
+    PLAIN_ENGLISH_DIRECTIVE,
+    TNT_VOICE,
+    apply_fixes,
+    blocking_issues,
+    cosmetic_issues,
+    post_issues,
+)
+
+from .seta_content_generation import QualityBlocked  # noqa: E402  (shared exception)
 
 logger = logging.getLogger(__name__)
 
@@ -151,10 +160,21 @@ class LinkedInPostGenerator(BaseContentGenerator):
                     "focused retry - %s", fix_remaining[0] if fix_remaining else "",
                 )
 
-        if remaining:
+        # Same rule as Seta, and this is the generator every Bolla tenant on the
+        # "tnt" template runs, so tenants inherit the refusal without configuring
+        # anything. A tenant should not have to know that a model invents figures
+        # in order to be protected from publishing them.
+        blocking = blocking_issues(remaining)
+        if blocking:
+            logger.error(
+                "QUALITY_BLOCKED: refusing to publish - %s", "; ".join(blocking)
+            )
+            raise QualityBlocked("; ".join(blocking))
+        cosmetic = cosmetic_issues(remaining)
+        if cosmetic:
             logger.warning(
-                "TNT post published with unresolved quality issues: %s",
-                "; ".join(remaining),
+                "TNT post published with unresolved STYLE issues: %s",
+                "; ".join(cosmetic),
             )
 
         hashtags = payload.get("hashtags") or []

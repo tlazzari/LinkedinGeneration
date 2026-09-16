@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+
+from linkedin_generation.social.seta_content_generation import QualityBlocked
 import os
 import subprocess
 from dataclasses import dataclass, replace
@@ -456,13 +458,23 @@ def daily_runner(
 
     logging.info("Selected pillar %s (post_type=%s image_mode=%s)", pillar.name, post_type, image_mode)
 
-    post = generator.generate(
-        pillar=pillar,
-        scheduled_for=scheduled_for,
-        post_type=post_type,
-        image_mode=image_mode,
-        holiday=decision.holiday if decision.reason == "holiday" else None,
-    )
+    # A draft that would mislead the reader is skipped, not published. This is
+    # the scheduler every Bolla tenant on the "tnt" template runs, so the refusal
+    # reaches them with nothing to configure. Added 2026-09-16.
+    try:
+        post = generator.generate(
+            pillar=pillar,
+            scheduled_for=scheduled_for,
+            post_type=post_type,
+            image_mode=image_mode,
+            holiday=decision.holiday if decision.reason == "holiday" else None,
+        )
+    except QualityBlocked as exc:
+        logging.error(
+            "QUALITY_BLOCKED: no post for %s today - the draft would have misled "
+            "the reader and one retry did not clear it: %s", pillar.name, exc,
+        )
+        return None
 
     try:
         image_payload, video_path = generate_image_with_fallback(
@@ -617,6 +629,11 @@ def build_job(
                 post_type=next_post_type,
                 image_mode=next_image_mode,
             )
+        except QualityBlocked as exc:
+            logging.error(
+                "QUALITY_BLOCKED: skipping %s - %s", pillar.name, exc,
+            )
+            return None
         except QuotaExceededError as exc:
             logging.warning("Gemini quota reached (%s). Falling back to OpenRouter", exc)
             fallback_model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet")

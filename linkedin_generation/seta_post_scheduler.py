@@ -32,14 +32,17 @@ from linkedin_generation.social.image_providers import (
 )
 from linkedin_generation.social.news_search import fetch_article_preview_image
 from linkedin_generation.social.brand import BRANDS
-from linkedin_generation.social.seta_content_generation import ConfidentialityBlocked
+from linkedin_generation.social.seta_content_generation import (
+    ConfidentialityBlocked,
+    QualityBlocked,
+)
 from linkedin_generation.social.brand_store import campaign_for
 from linkedin_generation.social.post_delivery import (
     delivery_mode as resolve_delivery_mode,
     delivery_recipients,
     send_post_email,
 )
-from linkedin_generation.social.seta_chart_generator import generate_market_chart, CHART_TYPES
+from linkedin_generation.social.seta_chart_generator import generate_market_chart, chart_alt_text, CHART_TYPES
 from linkedin_generation.social.artifacts import slugify, save_artifacts
 from linkedin_generation.holiday.calendars import load_calendars
 from linkedin_generation.holiday.scheduler import HolidayAwareScheduler
@@ -444,6 +447,15 @@ def run_single_generation(
             image_mode="photo",
             chart_data=chart_data_summary,
         )
+    except QualityBlocked as exc:
+        # A post that contradicts its own data, or cites figures from nowhere, is
+        # not improved by publishing it. Skip the slot - same trade as a
+        # confidentiality block. Added 2026-09-16.
+        logging.error(
+            "QUALITY_BLOCKED: no post today - the draft would have misled the "
+            "reader and one retry did not clear it: %s", exc,
+        )
+        return None
     except ConfidentialityBlocked as exc:
         logging.error(
             "CONFIDENTIALITY_BLOCKED: no post today - the draft named a "
@@ -453,11 +465,16 @@ def run_single_generation(
         return None
 
     if pillar.use_chart:
+        # NOT post.alt_text: that describes the photo the model imagined, and the
+        # media attached here is a chart. See chart_alt_text() for the post that
+        # shipped a handshake description on an exchange-rate graph.
         image_payload = ImagePayload(
             prompt=pillar.image_prompt or post.image_prompt or f"Market data chart for {pillar.name}",
             provider="seta_chart_generator",
             path=chart_gif_path,
-            alt_text=post.alt_text,
+            alt_text=chart_alt_text(
+                CHART_TYPES[chart_type_idx % len(CHART_TYPES)], chart_data_summary
+            ),
         )
 
     elif pillar.use_veo:
@@ -817,6 +834,15 @@ def _run_holiday_post(
             post_type="holiday",
             image_mode="photo",
         )
+    except QualityBlocked as exc:
+        # A post that contradicts its own data, or cites figures from nowhere, is
+        # not improved by publishing it. Skip the slot - same trade as a
+        # confidentiality block. Added 2026-09-16.
+        logging.error(
+            "QUALITY_BLOCKED: no post today - the draft would have misled the "
+            "reader and one retry did not clear it: %s", exc,
+        )
+        return None
     except ConfidentialityBlocked as exc:
         logging.error(
             "CONFIDENTIALITY_BLOCKED: no post today - the draft named a "

@@ -1723,4 +1723,193 @@ finally:
     BRANDS.pop('t5555_zc', None)
     _bs.apply_configs()
 
+
+# ─── The 2026-09-15 Market Intelligence post ─────────────────────────────────
+# Tom: "the latest seta capital linkedin post is ridiculous, it couples exchange
+# rates and the visit of a chinese diplomat". Reading it turned up three defects,
+# one of them worse than the coupling he spotted: the post told PE partners that
+# a STRENGTHENING yuan makes European assets more expensive for Chinese buyers,
+# and cheaper for Europeans buying in China. Both exactly inverted. The same
+# inversion was in the 13 Sep draft too, so it was systematic, not a one-off.
+from linkedin_generation.social.post_quality import (
+    contradicted_directional_claims, spurious_causal_link,
+)
+from linkedin_generation.social.seta_chart_generator import chart_alt_text, _build_summary
+
+_STRONG = "EUR/CNY: 7.7444  (90d ago: 7.9556,  -2.65%,  CNY strengthening vs EUR)"
+_WEAK   = "EUR/CNY: 7.9556  (90d ago: 7.7444,  +2.65%,  CNY weakening vs EUR)"
+
+t.check('FX: the published inversion is caught (Europe dearer for Chinese buyers)',
+        bool(contradicted_directional_claims(
+            "This makes European assets more expensive for Chinese buyers.", _STRONG)))
+t.check('FX: the second half is caught too (China cheaper for Europeans)',
+        bool(contradicted_directional_claims(
+            "It reduces the acquisition cost for European companies buying in China.",
+            _STRONG)))
+t.check('FX: "more costly" phrasing is caught, not just "more expensive"',
+        bool(contradicted_directional_claims(
+            "It also makes European targets more costly for Chinese acquirers.", _STRONG)))
+t.check('FX: the CORRECT statement passes',
+        not contradicted_directional_claims(
+            "This makes European assets cheaper for Chinese buyers.", _STRONG))
+t.check('FX: the correct statement for the other side passes',
+        not contradicted_directional_claims(
+            "Chinese targets are more expensive for European buyers.", _STRONG))
+t.check('FX: the rule inverts with the data - weakening CNY flips what is right',
+        bool(contradicted_directional_claims(
+            "This makes European assets cheaper for Chinese buyers.", _WEAK))
+        and not contradicted_directional_claims(
+            "This makes European assets more expensive for Chinese buyers.", _WEAK))
+t.check('FX: no data in sources means no verdict, not a false accusation',
+        not contradicted_directional_claims(
+            "This makes European assets more expensive for Chinese buyers.", ""))
+
+t.check('LINK: the published headline is rejected',
+        bool(spurious_causal_link(
+            "China-EU Relations: Diplomatic Talks Continue as CNY Strengthens 2.8% Against EUR")))
+t.check('LINK: the invented body claim is rejected',
+        bool(spurious_causal_link(
+            "This high-level dialogue signals continued engagement, which helps "
+            "cross-border M&A sentiment.")))
+t.check('LINK: an ATTRIBUTED causal claim is allowed',
+        not spurious_causal_link(
+            "According to Reuters, the talks drove the yuan 0.4% higher against the euro."))
+t.check('LINK: a market-only sentence is untouched',
+        not spurious_causal_link(
+            "The EUR/CNY rate reached 7.7489, down 2.8% over ninety days."))
+t.check('LINK: an event-only sentence is untouched',
+        not spurious_causal_link(
+            "China's Commerce Minister met the Bulgarian deputy prime minister on 12 September."))
+
+t.check('ALT: chart alt text describes the chart, not an imagined photo',
+        'EUR/CNY' in chart_alt_text('dual_axis', _STRONG)
+        and 'handshake' not in chart_alt_text('dual_axis', _STRONG).lower())
+t.check('ALT: the GDP chart does not quote an FX level it never plots',
+        'EUR/CNY' not in chart_alt_text('gdp_bars', _STRONG))
+t.check('ALT: length stays inside the 15-25 word guidance',
+        all(12 <= len(chart_alt_text(k, _STRONG).split()) <= 28
+            for k in ('fx_trend', 'gdp_bars', 'dual_axis')))
+
+t.check('FX: the summary now hands the model the implication, not just the direction',
+        'IMPLICATION' in _build_summary(
+            type('S', (), {'label': 'EUR/CNY', 'dates': ['a', 'b'],
+                           'values': [7.9556, 7.7444], 'unit': ''})(),
+            None, None, None))
+
+# Both gates are unconditional: a Bolla tenant inherits them without configuring
+# anything, which is the only way a fix like this reaches nine other brands.
+_tv = BRANDS['seta'].voice
+t.check('TRANSFER: the gates run with no BrandVoice flag to disable them',
+        not hasattr(_tv, 'allow_inverted_claims')
+        and not hasattr(_tv, 'allow_spurious_links'))
+
+
+# ─── A gate that cannot stop anything is documentation, not a control ────────
+# Until 2026-09-16 confidentiality was the only blocking gate; everything else
+# logged "published with unresolved quality issues" and shipped. That made the
+# two gates above advisory on the day they were written.
+from linkedin_generation.social.post_quality import blocking_issues, cosmetic_issues
+from linkedin_generation.social.seta_content_generation import QualityBlocked
+from linkedin_generation.social.content_generation import (
+    QualityBlocked as _TNTQualityBlocked,
+)
+
+_MISLEADING = [
+    "claim contradicts the data it cites - the data says the CNY is strengthening",
+    "asserts a link between an event and a market figure that no source makes",
+    "statistics with no source in the fetched data - remove or replace '30%'",
+    "invented case study - no such customer appears in the record",
+    "names a company that no cited article names: Gartenwelt Handels GmbH",
+    "promotes a competitor - remove 'LuoYang Bearing'",
+]
+_CLUMSY = [
+    "too much abstract filler (2.8 per 100 words, limit 2.5)",
+    "body is a single block - break it into 3-4 short paragraphs",
+    "a paragraph runs 162 words - keep each under 60",
+    "closing paragraph asks no question - end on a genuine open question",
+    "headline reuses the house cliche 'navigating'",
+]
+
+t.check('BLOCK: every misleading issue stops the post',
+        len(blocking_issues(_MISLEADING)) == len(_MISLEADING))
+t.check('BLOCK: no merely clumsy issue stops the post',
+        blocking_issues(_CLUMSY) == [])
+t.check('BLOCK: the two sets partition the input, nothing is lost',
+        sorted(blocking_issues(_MISLEADING + _CLUMSY)
+               + cosmetic_issues(_MISLEADING + _CLUMSY))
+        == sorted(_MISLEADING + _CLUMSY))
+t.check('BLOCK: clumsy issues still surface as cosmetic, not silently dropped',
+        len(cosmetic_issues(_CLUMSY)) == len(_CLUMSY))
+# End-to-end through post_issues, which is the path that actually runs: the
+# classification keys off the message post_issues builds, so testing the raw
+# helper proved nothing about whether a real post would be stopped.
+_INV_ISSUES = post_issues(
+    {'headline': 'FX update',
+     'body': 'The CNY strengthened 2.7%. This makes European assets more '
+             'expensive for Chinese buyers.',
+     'cta': 'What are you seeing? And you?'},
+    BRANDS['seta'].voice,
+    sources='EUR/CNY: 7.7444 (90d ago: 7.9556, -2.65%, CNY strengthening vs EUR)',
+)
+t.check('BLOCK: a real inverted-FX post is stopped end to end',
+        bool(blocking_issues(_INV_ISSUES)))
+t.check('BLOCK: and the finding explains which way round it should read',
+        any('cheaper for Chinese buyers' in i for i in _INV_ISSUES))
+t.check('BLOCK: the spurious-link finding is classified as blocking',
+        bool(blocking_issues([
+            "asserts a link between an event and a market figure that no source "
+            "makes - say they are separate, or attribute it: \"x\""])))
+
+# The refusal has to reach the tenants, and it does so by being in the shared
+# generator rather than in Seta's copy of it.
+t.check('TRANSFER: Seta and the tenant template raise the SAME exception',
+        QualityBlocked is _TNTQualityBlocked)
+t.check('TRANSFER: it is a hard failure, not a warning subclass',
+        issubclass(QualityBlocked, Exception)
+        and not issubclass(QualityBlocked, Warning))
+
+import inspect as _insp
+from linkedin_generation import linkedin_post_scheduler as _tnt_sched
+from linkedin_generation import seta_post_scheduler as _seta_sched
+t.check('TRANSFER: the tenant scheduler catches it (a block must skip, not crash)',
+        'QualityBlocked' in _insp.getsource(_tnt_sched))
+t.check('TRANSFER: the Seta scheduler catches it too',
+        'QualityBlocked' in _insp.getsource(_seta_sched))
+
+
+# The truth table the FX gate has to satisfy. Both halves matter equally: the
+# first cut of this gate flagged two CORRECT sentences during a live dry run,
+# and a gate that blocks correct copy would have stopped Seta posting entirely -
+# a worse outcome than the error it was written to prevent.
+_S = "EUR/CNY: 7.7444 (90d ago: 7.9556, -2.65%, CNY strengthening vs EUR)"
+_W = "EUR/CNY: 7.9556 (90d ago: 7.7444, +2.65%, CNY weakening vs EUR)"
+_FX_TRUTH = [
+    # (label, sources, sentence, should_flag)
+    ("EU buyer pays more for a CN asset is CORRECT", _S,
+     "Conversely, European buyers pay more EUR for Chinese assets, making them more expensive.", False),
+    ("a cost claim about US RATES is not this gate's business", _S,
+     "Higher US rates increase the cost of leveraged buyout financing globally for both European and Chinese buyers.", False),
+    ("nor one about yields", _S,
+     "The 10-year yield rose to 4.7%, raising the cost for European acquirers.", False),
+    ("nor one about tariffs", _S,
+     "New tariffs make European components more expensive for Chinese buyers.", False),
+    ("the published inversion, which names no currency in its own sentence", _S,
+     "This makes European assets more expensive for Chinese buyers.", True),
+    ("and its second half", _S,
+     "It reduces the acquisition cost for European companies buying in China.", True),
+    ("the 13 Sep variant, phrased 'more costly'", _S,
+     "It also makes European targets more costly for Chinese acquirers.", True),
+    ("the 13 Sep first half", _S,
+     "A stronger CNY makes Chinese assets less expensive for European buyers.", True),
+    ("the correct statement passes", _S,
+     "A stronger CNY makes European assets cheaper for Chinese buyers.", False),
+    ("the same words are CORRECT when the CNY is weakening", _W,
+     "This makes European assets more expensive for Chinese buyers.", False),
+    ("and wrong the other way", _W,
+     "A weaker CNY makes European assets cheaper for Chinese buyers.", True),
+]
+for _label, _src, _sent, _should in _FX_TRUTH:
+    _got = bool(contradicted_directional_claims(_sent, _src))
+    t.check(f'FXTABLE: {_label}', _got == _should)
+
 sys.exit(t.summary())

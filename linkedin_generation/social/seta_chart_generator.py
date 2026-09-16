@@ -379,6 +379,40 @@ def _chart_dual_axis(eurchny: SeriesData, yield10y: SeriesData, n_frames: int = 
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
+
+# Alt text has to describe the media that is ACTUALLY attached. On 2026-09-15 a
+# post carried an animated EUR/CNY chart with the alt text "Chinese and Bulgarian
+# officials shake hands after talks on economic and trade relations" -- the model
+# had written alt text for the photo it imagined, and the scheduler passed it
+# through unchanged when the chart replaced that photo. A screen-reader user was
+# told there was a handshake photograph on the page. It is also a third
+# description: the image_prompt asked for a Bloomberg terminal.
+#
+# The chart knows what the chart shows, so the chart writes the alt text.
+def chart_alt_text(chart_type: str, summary: str) -> str:
+    """Describe the rendered chart, in the 15-25 words LinkedIn alt text wants."""
+    figures = ""
+    for line in (summary or "").splitlines():
+        if line.startswith("EUR/CNY:"):
+            figures = line.split("(")[0].replace("EUR/CNY:", "EUR/CNY at").strip()
+            break
+
+    if chart_type == "fx_trend":
+        base = "Animated line chart of EUR/CNY and EUR/USD exchange rates over the last 90 days"
+    elif chart_type == "gdp_bars":
+        base = "Animated bar chart comparing annual GDP growth for China, Germany, Italy, France and the United States"
+    elif chart_type == "dual_axis":
+        base = "Animated dual-axis chart plotting the EUR/CNY exchange rate against the US 10-year Treasury yield over 90 days"
+    else:
+        base = "Animated chart of Europe-China macroeconomic indicators"
+
+    # Only quote the FX level on a chart that actually plots it. The first cut
+    # appended it to the GDP chart too -- alt text citing a number the reader
+    # cannot see is the same defect this function exists to stop.
+    shows_fx = chart_type in ("fx_trend", "dual_axis")
+    tail = f", {figures}" if (figures and shows_fx) else ""
+    return f"{base}{tail}, in Seta Capital navy and gold."
+
 def generate_market_chart(
     *,
     target_dir: Path,
@@ -438,10 +472,33 @@ def _build_summary(
     if eurchny and eurchny.values:
         pct = (eurchny.values[-1] - eurchny.values[0]) / eurchny.values[0] * 100
         direction = "CNY weakening vs EUR" if pct > 0 else "CNY strengthening vs EUR"
+        # Spell out what the direction MEANS for each side of a deal. The summary
+        # used to stop at the direction, and on 2026-09-15 the model filled the gap
+        # itself and got both halves exactly backwards -- it told PE partners that a
+        # stronger CNY makes European assets "more expensive for Chinese buyers".
+        # The quote is EUR/CNY (CNY per EUR), so a falling rate means a Chinese buyer
+        # pays FEWER CNY for the same European asset. That is arithmetic, not
+        # judgement, so it belongs in code. contradicted_directional_claims() in
+        # post_quality.py rejects the post if the model contradicts it anyway.
+        if pct < 0:   # EUR/CNY down = fewer CNY per EUR = CNY stronger
+            implication = (
+                "IMPLICATION (state it this way round): a Chinese buyer now pays FEWER "
+                "CNY for the same European asset, so European targets are CHEAPER for "
+                "Chinese acquirers; a European buyer pays MORE EUR for the same Chinese "
+                "asset, so Chinese targets are MORE EXPENSIVE for European acquirers."
+            )
+        else:
+            implication = (
+                "IMPLICATION (state it this way round): a Chinese buyer now pays MORE "
+                "CNY for the same European asset, so European targets are MORE EXPENSIVE "
+                "for Chinese acquirers; a European buyer pays FEWER EUR for the same "
+                "Chinese asset, so Chinese targets are CHEAPER for European acquirers."
+            )
         lines.append(
             f"EUR/CNY: {eurchny.values[-1]:.4f}  "
             f"(90d ago: {eurchny.values[0]:.4f},  {pct:+.2f}%,  {direction})"
         )
+        lines.append(implication)
 
     if eurusd and eurusd.values:
         pct = (eurusd.values[-1] - eurusd.values[0]) / eurusd.values[0] * 100

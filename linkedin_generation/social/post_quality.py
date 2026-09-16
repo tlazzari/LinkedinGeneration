@@ -688,6 +688,200 @@ def competitor_promotion(text: str, competitors: Sequence[str]) -> List[str]:
     return sorted(set(hits))
 
 
+
+# ─── Directional claims must agree with the data they came from ──────────────
+# Added 2026-09-15 after a published Market Intelligence post told PE partners
+# that a STRENGTHENING yuan makes European assets "more expensive for Chinese
+# buyers", and in the next line that it "reduces the acquisition cost for
+# European companies buying in China". Both halves were exactly inverted. The
+# chart summary had stated the direction correctly; the model supplied the
+# interpretation and got it backwards, and nothing checked interpretation.
+#
+# The direction is a fact carried in `sources`. What it implies for each side of
+# a deal is arithmetic. So this compares the post's claim against the data
+# instead of trusting the model to reason about it.
+#
+# ON for every brand, with no flag to turn it off: there is no brand for which
+# publishing an inverted economic claim is acceptable, and a tenant should not
+# have to know this failure mode exists in order to be protected from it.
+
+_DIR_RE = re.compile(r"CNY (strengthening|weakening) vs EUR", re.I)
+
+# Words a post uses to say something got dearer or cheaper.
+# "more costly" was missing on the first pass and a real inverted sentence walked
+# through the gate -- "It also makes European targets more costly for Chinese
+# acquirers" (13 Sep). Comparative cost is said many ways; enumerate them.
+_DEARER = r"(?:more expensive|more costly|dearer|costlier|costs? more|pricier|increases? the (?:acquisition )?cost|raises? the (?:acquisition )?cost|push(?:es|ing)? up the cost)"
+_CHEAPER = r"(?:cheaper|less expensive|less costly|more affordable|costs? less|reduces? the (?:acquisition )?cost|lowers? the (?:acquisition )?cost|bring(?:s|ing)? down the cost)"
+
+# Which side of the trade the sentence is talking about.
+# These must name an ACTOR, never just the nationality of an asset. The first
+# cut allowed a bare "for chinese", which matched "European buyers pay more EUR
+# for Chinese ASSETS" -- a correct sentence -- and reported it as inverted. A
+# gate that blocks correct copy is worse than no gate: it would have stopped Seta
+# posting at all.
+_ACTOR = r"(?:buyer|acquirer|bidder|investor|corporate|group|firm|compan\w+|purchaser|bidder)"
+_CN_BUYS_EU = rf"chinese \w*\s*{_ACTOR}"
+_EU_BUYS_CN = rf"european \w*\s*{_ACTOR}"
+
+# Scope by EXCLUSION, not by requiring a currency word in the same sentence.
+# Requiring one looked right and silently missed the published error, because the
+# rate is named in one sentence and the consequence asserted in the next -- "The
+# EUR/CNY rate has seen significant movement. This makes European assets more
+# expensive for Chinese buyers." The second sentence carries no currency token at
+# all. So instead: adjudicate every cost claim EXCEPT those the sentence itself
+# attributes to something other than the exchange rate. "Higher US rates increase
+# the cost of LBO financing for European and Chinese buyers" is true, is about
+# rates, and is none of this gate's business.
+# \b matters on both: bare "euro" matches inside "European", which put every
+# sentence mentioning European buyers back in scope and re-created the very
+# false positive this line exists to remove.
+_OTHER_DRIVER = (
+    r"(?:\brates?\b|yields?|treasury|treasuries|basis points?|inflation|tariffs?"
+    r"|duties|financing cost|borrowing cost|credit|leverage ratio|debt market"
+    r"|interest)"
+)
+
+
+def contradicted_directional_claims(text: str, sources: str) -> List[str]:
+    """Cost claims that contradict the exchange-rate direction in `sources`.
+
+    EUR/CNY is quoted as CNY per EUR, so:
+      CNY strengthening -> Europe is CHEAPER for a Chinese buyer,
+                           China is DEARER for a European buyer.
+      CNY weakening     -> the reverse.
+    """
+    if not sources:
+        return []
+    m = _DIR_RE.search(sources)
+    if not m:
+        return []
+    strengthening = m.group(1).lower() == "strengthening"
+
+    # (who is buying, what the sentence claims, what is true when CNY strengthens)
+    rules = [
+        (_CN_BUYS_EU, _DEARER, not strengthening, "European assets", "Chinese buyers"),
+        (_CN_BUYS_EU, _CHEAPER, strengthening, "European assets", "Chinese buyers"),
+        (_EU_BUYS_CN, _DEARER, strengthening, "Chinese assets", "European buyers"),
+        (_EU_BUYS_CN, _CHEAPER, not strengthening, "Chinese assets", "European buyers"),
+    ]
+
+    truth = "strengthening" if strengthening else "weakening"
+    out: List[str] = []
+    for sentence in split_sentences(text):
+        low = sentence.lower()
+        if re.search(_OTHER_DRIVER, low):
+            continue
+        for who, claim, claim_is_correct, what, side in rules:
+            if re.search(who, low) and re.search(claim, low):
+                if not claim_is_correct:
+                    says = "more expensive" if claim is _DEARER else "cheaper"
+                    right = "cheaper" if says == "more expensive" else "more expensive"
+                    out.append(
+                        f"the data says the CNY is {truth}, which makes {what} "
+                        f"{right} for {side} - the post says {says}: "
+                        f"\"{sentence.strip()[:110]}\""
+                    )
+                break
+    return out
+
+
+# ─── Do not invent a link between an event and a market number ───────────────
+# Same post, the headline the reader actually sees: "China-EU Relations:
+# Diplomatic Talks Continue as CNY Strengthens 2.8% Against EUR". A commerce
+# minister's meeting with a Bulgarian deputy PM and a 90-day FX move are two
+# unrelated facts; "as" asserts they belong together, and the body went further
+# ("signals continued engagement, which helps cross-border M&A sentiment").
+#
+# The cause is structural: this pillar feeds the model a chart AND a news story
+# with no requirement that they be about the same thing, so the only way to
+# produce one coherent post is to invent the connective tissue.
+#
+# A real causal link is publishable when somebody credible asserted it. An
+# invented one is not. So this permits the claim when the sentence attributes
+# it, exactly like unattributed_official_framing().
+
+_EVENT = r"(?:meeting|meet(?:s|ing)? with|met with|talks|dialogue|summit|visit|delegation|state visit|minister|premier|president|deputy prime|ambassador|signed an? (?:mou|agreement)|readout|communiqu)"
+# Not just figures. The worst sentence in the 15 Sep post asserted a causal link
+# to a MOOD -- "signals continued engagement, which helps cross-border M&A
+# sentiment" -- which is harder to challenge than a number precisely because
+# there is nothing to check it against. Deal outcomes belong in scope.
+_MARKET = (
+    r"(?:exchange rate|eur/?cny|eur/?usd|cny|yuan|renminbi|euro|yield|treasury"
+    r"|basis points?|\d+(?:\.\d+)?\s?%"
+    r"|m&a sentiment|deal sentiment|deal flow|deal activity|deal volumes?"
+    r"|valuations?|multiples?|investor sentiment|market sentiment"
+    r"|appetite|financing costs?|borrowing costs?)"
+)
+_LINK = r"(?:\bas\b|\bamid\b|\bamidst\b|\bwhile\b|signals?|signalling|signaling|helps?|drives?|driving|boosts?|supports?|reflects?|underscores?|underpins?|explains?|fuel(?:s|led|ing)?|sent\b|pushed\b)"
+_ATTRIBUTED = r"(?:according to|reported (?:by|that)|said|says|stated|analysts? at|economists? at|per\s+\w+|cited|attributed to|in a note)"
+
+
+def spurious_causal_link(text: str) -> List[str]:
+    """Sentences tying a political/diplomatic event to a market figure unasked.
+
+    Allowed when the sentence attributes the connection to someone; flagged when
+    the post asserts it on its own authority.
+    """
+    out: List[str] = []
+    for sentence in split_sentences(text):
+        low = sentence.lower()
+        if not re.search(_EVENT, low):
+            continue
+        if not re.search(_MARKET, low):
+            continue
+        if not re.search(_LINK, low):
+            continue
+        if re.search(_ATTRIBUTED, low):
+            continue
+        out.append(sentence.strip()[:130])
+    return out
+
+
+# ─── Which failures may never be published ───────────────────────────────────
+# Until 2026-09-16 confidentiality was the ONLY gate that stopped a post. Every
+# other rule logged "published with unresolved quality issues" and shipped it --
+# so a post could be internally contradictory, cite figures that appear in no
+# source, or invent a customer, and still go out. A dry run that afternoon did
+# exactly that, publishing "30%" and "EUR 4.3" with neither traceable to any
+# fetched data.
+#
+# That made every gate a suggestion, including the two written that morning to
+# catch the inverted-economics post. A rule that cannot stop anything is
+# documentation, not a control.
+#
+# The line is not severity, it is KIND: does the post mislead a reader or expose
+# a party, or is it merely clumsy? Being wordy is a bad post and it can ship with
+# a warning. Telling PE partners the opposite of how an exchange rate works is a
+# false post, and an M&A adviser does not get to publish one. Skipping a slot
+# costs nothing -- the same trade already accepted for confidentiality.
+BLOCKING_MARKERS = (
+    "claim contradicts the data it cites",     # provably false against our own figures
+    # Defence in depth: the marker above is the PREFIX post_issues adds, so
+    # rewording that prefix would silently downgrade a false claim to cosmetic.
+    # This one is a phrase from the finding itself and survives that edit.
+    "the post says",
+    "asserts a link between an event",         # a relationship no source makes
+    "statistics with no source",               # invented figures
+    "invented case",                           # invented customers or mandates
+    "mandates",                                # counting Seta's own mandates
+    "names a company",                         # tenant legal exposure
+    "promotes a competitor",                   # sends TNT's readers elsewhere
+    "official framing",                        # republishing a state line unattributed
+    "vague source",                            # "studies show" with no study
+)
+
+
+def blocking_issues(issues: Sequence[str]) -> List[str]:
+    """The subset of `issues` that must prevent publication."""
+    return [i for i in issues if any(m in i.lower() for m in BLOCKING_MARKERS)]
+
+
+def cosmetic_issues(issues: Sequence[str]) -> List[str]:
+    """Issues worth a warning but not worth losing the slot over."""
+    blocking = set(blocking_issues(issues))
+    return [i for i in issues if i not in blocking]
+
 def post_issues(
     payload: Dict[str, object],
     voice: BrandVoice,
@@ -715,6 +909,22 @@ def post_issues(
         hits = promotional_hits(whole)
         if hits:
             issues.append("promotional phrasing - remove " + ", ".join(f"'{h}'" for h in hits))
+
+    # Both of these run for EVERY brand and have no opt-out flag. A tenant should
+    # not need to know these failure modes exist to be protected from them, and
+    # there is no brand for which inverted economics or invented causality is
+    # acceptable copy. See the two functions above for the post that caused them.
+    for bad in contradicted_directional_claims(whole, sources or ""):
+        issues.append("claim contradicts the data it cites - " + bad)
+
+    # Headline and body are checked separately: a headline has no full stop, so
+    # concatenating them made split_sentences() run the two together and report a
+    # 130-character smear instead of the offending line.
+    for bad in spurious_causal_link(headline) + spurious_causal_link(f"{body} {cta}"):
+        issues.append(
+            "asserts a link between an event and a market figure that no source "
+            f"makes - say they are separate, or attribute it: \"{bad}\""
+        )
 
     brand = re.escape(voice.name)
     brand_count = len(re.findall(brand, whole, flags=re.IGNORECASE))

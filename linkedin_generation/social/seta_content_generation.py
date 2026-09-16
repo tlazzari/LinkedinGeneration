@@ -29,6 +29,14 @@ class ConfidentialityBlocked(RuntimeError):
     treating it as a generation failure to retry.
     """
 
+class QualityBlocked(RuntimeError):
+    """A post that would mislead the reader. Not publishable, not retryable.
+
+    Sibling of ConfidentialityBlocked: same trade -- lose the slot rather than
+    publish something wrong. See BLOCKING_MARKERS in post_quality.py.
+    """
+
+
 
 class SetaLinkedInPostGenerator(BaseContentGenerator):
 
@@ -191,10 +199,20 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             payload = safe_payload
 
         remaining = post_issues(payload, SETA_VOICE, sources=sources, post_type=post_type)
-        if remaining:
+        blocking = blocking_issues(remaining)
+        if blocking:
+            # One retry has already happened above. If a post is still asserting
+            # something the data contradicts, or citing a figure no source
+            # supports, it does not go out. No post today is the correct outcome.
+            logger.error(
+                "QUALITY_BLOCKED: refusing to publish - %s", "; ".join(blocking)
+            )
+            raise QualityBlocked("; ".join(blocking))
+        cosmetic = cosmetic_issues(remaining)
+        if cosmetic:
             logger.warning(
-                "Seta post published with unresolved quality issues: %s",
-                "; ".join(remaining),
+                "Seta post published with unresolved STYLE issues: %s",
+                "; ".join(cosmetic),
             )
         hashtags = payload.get("hashtags") or []
         if isinstance(hashtags, str):
