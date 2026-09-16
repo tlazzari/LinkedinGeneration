@@ -1912,4 +1912,149 @@ for _label, _src, _sent, _should in _FX_TRUTH:
     _got = bool(contradicted_directional_claims(_sent, _src))
     t.check(f'FXTABLE: {_label}', _got == _should)
 
+
+# ─── The generator actually RUNS ────────────────────────────────────────────
+# This suite was green while generate() raised NameError on every call:
+# blocking_issues was used in seta_content_generation but never imported, and
+# every test above exercised the gate FUNCTIONS rather than the code path that
+# calls them. A dry run caught it; the tests did not. Tests that check the parts
+# and never assemble them will do this again.
+#
+# A stub LLM keeps it offline and deterministic. It does not assert copy quality
+# - the gates above do that - only that a post can be generated at all, and that
+# a misleading one raises instead of returning.
+import datetime as _dt
+from linkedin_generation.social.seta_content_generation import SetaLinkedInPostGenerator
+from linkedin_generation.social.campaign_config import PostPillar
+
+
+class _StubLLM:
+    def __init__(self, payload):
+        self._payload = payload
+        self.calls = 0
+
+    def complete(self, prompt, **kw):
+        self.calls += 1
+        return _json_mod.dumps(self._payload)
+
+
+import json as _json_mod
+
+_CLEAN = {
+    "headline": "German capital shifts toward China",
+    "body": ("German direct investment into China rose sharply in the first half of "
+             "2026, according to Deutsche Welle.\n\n"
+             "The same report shows flows into the United States falling.\n\n"
+             "For a buyer, that changes which market the next deal comes from."),
+    "cta": "Which way are your own flows moving? And you?",
+    "hashtags": ["#MergersAndAcquisitions"],
+    "image_prompt": "A port at dawn",
+    "alt_text": "Containers stacked at a port at dawn, cranes behind them",
+}
+_DIRTY = dict(_CLEAN)
+_DIRTY["body"] = ("The EUR/CNY rate moved this quarter.\n\n"
+                  "This makes European assets more expensive for Chinese buyers.\n\n"
+                  "Deal teams should plan around it.")
+
+_pillar = PostPillar(name="M&A Insights", angle="test", target_client="test",
+                     news_queries=[], use_news_search=False)
+from linkedin_generation.social.campaign_config import CampaignConfig as _CC
+import pathlib as _pl
+_camp = _CC.from_yaml(_pl.Path("/opt/linkedin/config/seta_capital_linkedin.yaml"))
+
+try:
+    _gen = SetaLinkedInPostGenerator(campaign=_camp, llm_client=_StubLLM(_CLEAN),
+                                     strategy_text="Operator-led cross-border M&A.")
+    _post = _gen.generate(pillar=_pillar, scheduled_for=_dt.datetime.now(),
+                          post_type="technical", image_mode="photo")
+    t.check('SMOKE: generate() completes end to end on a clean payload',
+            bool(getattr(_post, 'headline', '')))
+except NameError as _e:
+    t.check(f'SMOKE: generate() completes end to end (NameError: {_e})', False)
+except Exception as _e:
+    t.check(f'SMOKE: generate() completes end to end (unexpected {type(_e).__name__}: {_e})',
+            False)
+
+try:
+    _gen2 = SetaLinkedInPostGenerator(campaign=_camp, llm_client=_StubLLM(_DIRTY),
+                                      strategy_text="Operator-led cross-border M&A.")
+    _gen2.generate(pillar=_pillar, scheduled_for=_dt.datetime.now(),
+                   post_type="technical", image_mode="photo",
+                   chart_data="EUR/CNY: 7.7444 (90d ago: 7.9556, -2.65%, CNY strengthening vs EUR)")
+    t.check('SMOKE: an inverted post RAISES instead of returning', False)
+except QualityBlocked:
+    t.check('SMOKE: an inverted post RAISES instead of returning', True)
+except Exception as _e:
+    t.check(f'SMOKE: an inverted post raises QualityBlocked (got {type(_e).__name__}: {_e})',
+            False)
+
+
+# ─── The same story twice ───────────────────────────────────────────────────
+# Tom, 16 Sep: "the 4% car manufacturer was a previous post even if on a
+# different news, there should be a check to avoid duplication."
+# 13 Sep: "Chinese Firms to Control 4% of European Auto Output by 2030"
+# 16 Sep: "European Car Factories Transfer to Chinese Ownership by 2030"
+# Same three source URLs, byte for byte - the search had no memory beyond one
+# call, so an article still ranking top a week later came back as new.
+from linkedin_generation.social.news_search import (
+    recent_post_history, repeats_recent_story, story_signature, _norm_url,
+)
+
+_A = {"headline": "Chinese Firms to Control 4% of European Auto Output by 2030",
+      "body": "Nikkei Chinese reported on 9 September 2026 that Chinese automakers "
+              "will use over 4% of Europe's car production capacity by 2030."}
+_B = {"headline": "European Car Factories Transfer to Chinese Ownership by 2030",
+      "body": "Nikkei Chinese, a Chinese-language publication, reported on 9 September "
+              "that Chinese carmakers will use over 4% of European auto production "
+              "capacity by 2030."}
+_C = {"headline": "German Mittelstand & Italian Family Business: A 2026 M&A Catalyst",
+      "body": "Generational shifts are reshaping Europe's industrial M&A landscape. "
+              "Germany's Mittelstand and Italy's family businesses face succession."}
+
+t.check('DEDUP: the real repeat is caught',
+        repeats_recent_story(_B["headline"], _B["body"], [_A]) == _A["headline"])
+t.check('DEDUP: an unrelated post on the same continent is NOT a repeat',
+        repeats_recent_story(_C["headline"], _C["body"], [_A]) is None)
+t.check('DEDUP: the current year alone never makes two posts a repeat',
+        repeats_recent_story(_C["headline"], _C["body"],
+                             [{"headline": "Europe-China Industrial M&A in 2026",
+                               "body": "The landscape continues its evolution in mid-2026."}])
+        is None)
+t.check('DEDUP: a post is not a repeat of itself when it is in the history',
+        repeats_recent_story(_A["headline"], _A["body"],
+                             [q for q in [_A] if q["headline"] != _A["headline"]]) is None)
+t.check('DEDUP: the shared facts are the figure and the publication, not wording',
+        {"4%", "2030"} <= story_signature(_A["headline"], _A["body"]))
+
+t.check('DEDUP: tracking parameters cannot disguise a used URL',
+        _norm_url("https://cn.nikkei.com/industry/icar/63862.html?from=rss")
+        == _norm_url("http://www.cn.nikkei.com/industry/icar/63862.html/"))
+
+_hist = recent_post_history("/opt/linkedin/linkedin_generation/seta_posts", days=45)
+t.check('DEDUP: history is read from the post artefacts themselves',
+        isinstance(_hist.get("urls"), set) and "posts" in _hist)
+t.check('DEDUP: a brand with no archive yet gets an empty history, not a crash',
+        recent_post_history("/nonexistent/dir/for/a/new/tenant")["urls"] == set())
+
+t.check('DEDUP: a retelling is BLOCKING, not a style note',
+        bool(blocking_issues(['retells a post from the last 45 days - "X" - find a different story'])))
+
+import inspect as _i2
+from linkedin_generation.social import news_search as _ns
+t.check('DEDUP: the search itself excludes already-used URLs',
+        'exclude_urls' in _i2.signature(_ns.search_news_for_pillar).parameters)
+
+
+# A fallback that hides an outage is a blindfold, not redundancy. SerpAPI's free
+# plan ran out on 16 Sep and every call returned 429; the chain fell through to
+# Gemini grounding and kept producing posts, so nothing looked wrong while the
+# Chinese-first search was gone. Same shape as the three-week outage.
+from linkedin_generation.social.news_search import serpapi_quota
+_q = serpapi_quota()
+t.check('QUOTA: SerpAPI account is reachable and reports a balance',
+        _q.get("configured") is False or "left" in _q or "error" in _q)
+if _q.get("configured") and "left" in _q:
+    t.check(f'QUOTA: SerpAPI has searches left (plan={_q.get("plan")}, left={_q.get("left")})',
+            not _q.get("exhausted"))
+
 sys.exit(t.summary())

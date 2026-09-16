@@ -810,6 +810,186 @@ def _rank_key(result: dict):
     return (3, 0, age)
 
 
+
+# ─── Do not write the same story twice ───────────────────────────────────────
+# 13 Sep: "Chinese Firms to Control 4% of European Auto Output by 2030".
+# 16 Sep: "European Car Factories Transfer to Chinese Ownership by 2030".
+# Same figure, same year, same three source URLs byte for byte. The search had
+# no memory: `seen_urls` inside search_news_for_pillar dedupes within ONE call
+# and is thrown away after it, so an article that is still the top hit next week
+# is served again as though it were new.
+#
+# The memory already exists - every saved post artefact records `news_urls`. So
+# the record of what has been written about IS the post archive, and there is no
+# second store to drift out of step with it.
+
+_URL_IN_ARTEFACT = re.compile(r"https?://[^\s|]+")
+
+
+def _norm_url(url: str) -> str:
+    """Compare on host+path: tracking parameters must not disguise a repeat."""
+    u = url.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+    return u.replace("https://", "").replace("http://", "").replace("www.", "").lower()
+
+
+_STOP = {
+    "the", "a", "an", "of", "for", "and", "to", "in", "on", "by", "with", "as",
+    "at", "from", "into", "amid", "amidst", "its", "their", "this", "that",
+    # House words that appear in half the archive and would make every pair of
+    # posts look similar. "Navigating" alone opens five of them.
+    "navigating", "europe", "european", "china", "chinese", "m&a", "ma", "deal",
+    "deals", "cross-border", "crossborder", "2026", "capital", "seta",
+    # Capitalised only because they open a sentence - not names.
+    "these", "those", "this", "there", "they", "when", "while", "where",
+    "what", "which", "such", "both", "many", "most", "some", "recent",
+    "understanding", "higher", "lower", "german", "germany", "italy",
+    "italian", "french", "france",
+}
+
+
+def _title_terms(text: str) -> set:
+    words = re.findall(r"[\w&%]+", (text or "").lower())
+    return {w for w in words if w not in _STOP and len(w) > 2}
+
+
+def recent_post_history(posts_dir, days: int = 45) -> dict:
+    """URLs and headline terms used by saved posts in the last `days`.
+
+    Reads the artefacts rather than a side file, so it can never disagree with
+    what was actually written.
+    """
+    from pathlib import Path
+    import json as _json
+    from datetime import datetime, timedelta
+
+    urls: set = set()
+    headlines: list = []
+    posts: list = []
+    d = Path(posts_dir)
+    if not d.is_dir():
+        return {"urls": urls, "headlines": headlines, "posts": posts}
+
+    cutoff = datetime.now() - timedelta(days=days)
+    for f in sorted(d.glob("20*.json")):
+        stamp = f.name[:8]
+        try:
+            when = datetime.strptime(stamp, "%Y%m%d")
+        except ValueError:
+            continue
+        if when < cutoff:
+            continue
+        try:
+            data = _json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        # A post that was retracted is not a precedent to avoid repeating; it is
+        # one we would rather not repeat at all, so its URLs stay excluded.
+        for m in _URL_IN_ARTEFACT.finditer(str(data.get("news_urls", "") or "")):
+            urls.add(_norm_url(m.group(0)))
+        if data.get("headline"):
+            headlines.append(str(data["headline"]))
+            posts.append({"headline": str(data["headline"]),
+                          "body": str(data.get("body", "") or "")})
+    return {"urls": urls, "headlines": headlines, "posts": posts}
+
+
+def repeats_recent_headline(headline: str, recent: Sequence[str],
+                            threshold: float = 0.6) -> Optional[str]:
+    """The recent headline this one is a retread of, if any.
+
+    Jaccard overlap on meaningful terms. House vocabulary is stripped first,
+    otherwise every Europe-China M&A headline looks like every other one.
+    """
+    terms = _title_terms(headline)
+    if len(terms) < 3:
+        return None
+    for old in recent:
+        old_terms = _title_terms(old)
+        if len(old_terms) < 3:
+            continue
+        union = terms | old_terms
+        if not union:
+            continue
+        if len(terms & old_terms) / len(union) >= threshold:
+            return old
+    return None
+
+
+# Headline wording is a weak signal for a repeat. The 13 and 16 Sep posts told
+# the SAME story - "Chinese Firms to Control 4% of European Auto Output by 2030"
+# and "European Car Factories Transfer to Chinese Ownership by 2030" - and share
+# one meaningful word between them. What they share is the FACTS: the figure, the
+# year, the publication. So compare those.
+_SIG_NUM = re.compile(r"\b\d+(?:[.,]\d+)?\s?%|\b(?:19|20)\d{2}\b|\b\d+(?:[.,]\d+)?\s?(?:billion|million|bn|m)\b", re.I)
+_SIG_NAME = re.compile(r"\b[A-Z][\w&.-]+(?:\s+[A-Z][\w&.-]+)*")
+
+
+def story_signature(headline: str, body: str) -> set:
+    """The facts a post is built on: figures, years, and named entities.
+
+    Only the opening of the body: that is where the source and the anchor fact
+    are stated. Later paragraphs drift into generic commentary that every post
+    in the pillar shares.
+    """
+    opening = (body or "").strip().split("\n\n")[0]
+    text = f"{headline} {opening}"
+    sig = {m.group(0).replace(" ", "").lower() for m in _SIG_NUM.finditer(text)}
+    for m in _SIG_NAME.finditer(text):
+        token = m.group(0).strip().lower()
+        if token in _STOP or len(token) < 4:
+            continue
+        sig.add(token)
+    return sig
+
+
+def _is_distinctive_figure(token: str) -> bool:
+    """A figure that identifies a STORY, not one every post happens to carry.
+
+    The current year fails this: "2026" appears in nearly every headline, and
+    counting it let two unrelated posts about German and Italian industry look
+    like retellings of each other. A percentage, a quantity, or a year that is
+    not this one is specific enough to matter.
+    """
+    from datetime import datetime
+    t = token.replace(" ", "")
+    if not _SIG_NUM.fullmatch(t):
+        return False
+    this_year = str(datetime.now().year)
+    if t in (this_year, str(int(this_year) - 1)):
+        return False
+    return True
+
+
+def repeats_recent_story(headline: str, body: str, recent: Sequence[dict],
+                         threshold: float = 0.5) -> Optional[str]:
+    """The recent post this one retells, if any.
+
+    `recent` is the list of {'headline','body'} from recent_post_history.
+    """
+    sig = story_signature(headline, body)
+    if len(sig) < 3:
+        return None
+    for old in recent:
+        old_sig = story_signature(old.get("headline", ""), old.get("body", ""))
+        if len(old_sig) < 3:
+            continue
+        shared = sig & old_sig
+        if not shared:
+            continue
+        # Containment, not Jaccard. Two tellings of one story rarely share
+        # phrasing, so the union is dominated by each post's own wording: the
+        # 13/16 Sep pair shared 4%, 2030 and Nikkei Chinese and still scored
+        # only 0.36 against the union. What matters is how much of the SMALLER
+        # signature is accounted for.
+        containment = len(shared) / min(len(sig), len(old_sig))
+        # And it must be the same FACTS, not just the same nouns: a shared
+        # figure or year is what distinguishes retelling one story from two
+        # posts that happen to discuss the same industry.
+        shares_a_figure = any(_is_distinctive_figure(x) for x in shared)
+        if containment >= threshold and shares_a_figure:
+            return old.get("headline", "")
+    return None
+
 def search_news_for_pillar(
     pillar_name: str,
     num_articles: int = 3,
@@ -817,6 +997,7 @@ def search_news_for_pillar(
     queries: Optional[List[str]] = None,
     avoid_finance: bool = False,
     avoid_companies: Optional[Sequence[str]] = None,
+    exclude_urls: Optional[set] = None,
 ) -> List[NewsArticle]:
     """Find recent, specific news for a content pillar.
 
@@ -847,12 +1028,20 @@ def search_news_for_pillar(
     all_results: List[dict] = []
     seen_urls = set()
     seen_titles = set()
+    # Articles this brand has already written about. seen_urls only dedupes
+    # WITHIN one call; without this an article that is still the top hit next
+    # week comes back as though it were new, which is how the same Nikkei piece
+    # produced two posts three days apart (13 and 16 Sep 2026).
+    already_used = {_norm_url(u) for u in (exclude_urls or set())}
 
     def absorb(results: List[dict]) -> None:
         for r in results:
             url = r.get("url", "")
             title = (r.get("title") or "").strip().lower()
             if not url or url in seen_urls or (title and title in seen_titles):
+                continue
+            if _norm_url(url) in already_used:
+                logger.info("Skipping an article already written about: %s", url[:80])
                 continue
             title_raw = r.get("title", "") or ""
             if is_spam(title_raw, url):
@@ -956,6 +1145,39 @@ def providers_reachable() -> bool:
         return False
 
 
+
+def serpapi_quota() -> dict:
+    """SerpAPI searches remaining this month.
+
+    Added 2026-09-16 after the free plan's 250 searches ran out and every
+    SerpAPI call started returning 429. Nothing noticed: the chain silently fell
+    through to Gemini Google Search grounding, which still returns articles, so
+    the pipeline looked healthy while the Chinese-first search - the whole reason
+    SerpAPI is first in the chain - was gone.
+
+    That is the same shape as the three-week outage this module was rewritten
+    for: a provider failing quietly behind a fallback that covers for it. A
+    fallback that hides an outage is not redundancy, it is a blindfold.
+    """
+    key = os.getenv("SERP_API_KEY")
+    if not key:
+        return {"configured": False}
+    base = os.getenv("SERP_API_BASE", "https://serpapi.com").rstrip("/")
+    try:
+        r = requests.get(f"{base}/account", params={"api_key": key}, timeout=20)
+        r.raise_for_status()
+        d = r.json()
+        left = d.get("total_searches_left", d.get("plan_searches_left"))
+        return {
+            "configured": True,
+            "plan": d.get("plan_name"),
+            "left": left,
+            "used_this_month": d.get("this_month_usage"),
+            "exhausted": isinstance(left, int) and left <= 0,
+        }
+    except Exception as e:                      # network or auth problem
+        return {"configured": True, "error": str(e)[:160]}
+
 def provider_health(timeout_query: str = "中国 企业 收购 欧洲") -> dict:
     """Live check that the news providers actually return articles.
 
@@ -964,7 +1186,7 @@ def provider_health(timeout_query: str = "中国 企业 收购 欧洲") -> dict:
     weeks (2026-08-20 → 2026-09-13) while every post published on schedule with
     no news in it at all. Called by the LinkedIn test suite.
     """
-    health = {}
+    health = {"serpapi_quota": serpapi_quota()}
     try:
         health["serpapi_zh"] = len(search_news_serpapi(timeout_query, 5, lang="zh"))
     except Exception as e:

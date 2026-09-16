@@ -869,6 +869,7 @@ BLOCKING_MARKERS = (
     "promotes a competitor",                   # sends TNT's readers elsewhere
     "official framing",                        # republishing a state line unattributed
     "vague source",                            # "studies show" with no study
+    "retells a post",                          # the same story twice in a fortnight
 )
 
 

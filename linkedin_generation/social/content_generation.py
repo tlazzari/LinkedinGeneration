@@ -44,6 +44,24 @@ class LinkedInPostGenerator(BaseContentGenerator):
     social.base_content.BaseContentGenerator.
     """
 
+
+    def _recent_history(self) -> dict:
+        """What this brand has already published, for de-duplication.
+
+        Each brand reads its OWN output directory: a tenant must not inherit
+        Seta's archive, or its first post would be judged a repeat of ours.
+        """
+        try:
+            from . import BRANDS
+            brand = BRANDS.get(getattr(self, "brand_key", "") or "")
+            out = getattr(brand, "output_dir", None) if brand else None
+        except Exception:
+            out = None
+        base = out or "linkedin_generation/linkedin_posts"
+        if not str(base).startswith("/"):
+            base = "/opt/linkedin/" + str(base).lstrip("/")
+        return recent_post_history(base, days=45)
+
     def generate(
         self,
         *,
@@ -63,9 +81,11 @@ class LinkedInPostGenerator(BaseContentGenerator):
         news_context = ""
         if pillar.use_news_search and post_type != "holiday":
             logger.info("Searching for news for TNT pillar: %s", pillar.name)
+            _hist = self._recent_history()
             news_articles = search_news_for_pillar(
                 pillar.name,
                 num_articles=3,
+                exclude_urls=_hist["urls"],
                 queries=list(getattr(pillar, "news_queries", []) or []),
                 # TNT sells components, so an IPO or a results call gives it
                 # nothing to say, and a story about a competitor must never be the
@@ -164,6 +184,26 @@ class LinkedInPostGenerator(BaseContentGenerator):
         # "tnt" template runs, so tenants inherit the refusal without configuring
         # anything. A tenant should not have to know that a model invents figures
         # in order to be protected from publishing them.
+        # A story already told is not a new post. The URL exclusion above stops
+        # the common case (the same article still ranking top a week later);
+        # this catches the same story reached through a different article.
+        # Blocking, not cosmetic: republishing last week's post under a new
+        # headline is exactly the "they always say the same things" complaint.
+        try:
+            _prior = self._recent_history()["posts"]
+            _repeat = repeats_recent_story(
+                str(payload.get("headline", "")), str(payload.get("body", "")),
+                [q for q in _prior
+                 if q.get("headline") != str(payload.get("headline", ""))],
+            )
+        except Exception:      # history is an optimisation, never a hard dependency
+            _repeat = None
+        if _repeat:
+            remaining = list(remaining) + [
+                f"retells a post from the last 45 days - \"{_repeat}\" - "
+                f"find a different story"
+            ]
+
         blocking = blocking_issues(remaining)
         if blocking:
             logger.error(

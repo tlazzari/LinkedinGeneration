@@ -9,12 +9,25 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 from .campaign_config import CampaignConfig, PostPillar
-from .news_search import NewsArticle, search_news_for_pillar, build_news_context
+from .news_search import (
+    NewsArticle,
+    build_news_context,
+    recent_post_history,
+    repeats_recent_story,
+    search_news_for_pillar,
+)
 from .base_content import GeneratedPost, BaseContentGenerator
 from .confidentiality import confidentiality_issues
 from .seta_experience import build_experience_context
 from .media_prompts import compose_media_prompt
-from .post_quality import PLAIN_ENGLISH_DIRECTIVE, SETA_VOICE, apply_fixes, post_issues
+from .post_quality import (
+    PLAIN_ENGLISH_DIRECTIVE,
+    SETA_VOICE,
+    apply_fixes,
+    blocking_issues,
+    cosmetic_issues,
+    post_issues,
+)
 
 if TYPE_CHECKING:
     from linkedin_generation.holiday.calendars import HolidayEvent
@@ -48,6 +61,24 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
     news_articles list this brand populates.
     """
 
+
+    def _recent_history(self) -> dict:
+        """What this brand has already published, for de-duplication.
+
+        Each brand reads its OWN output directory: a tenant must not inherit
+        Seta's archive, or its first post would be judged a repeat of ours.
+        """
+        try:
+            from . import BRANDS
+            brand = BRANDS.get(getattr(self, "brand_key", "") or "")
+            out = getattr(brand, "output_dir", None) if brand else None
+        except Exception:
+            out = None
+        base = out or "linkedin_generation/seta_posts"
+        if not str(base).startswith("/"):
+            base = "/opt/linkedin/" + str(base).lstrip("/")
+        return recent_post_history(base, days=45)
+
     def generate(
         self,
         *,
@@ -63,9 +94,11 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         news_context = ""
         if pillar.use_news_search and post_type != "holiday":
             logger.info(f"Searching for news articles for pillar: {pillar.name}")
+            _hist = self._recent_history()
             news_articles = search_news_for_pillar(
                 pillar.name,
                 num_articles=3,
+                exclude_urls=_hist["urls"],
                 queries=list(getattr(pillar, "news_queries", []) or []),
             )
             news_context = build_news_context(news_articles)
@@ -199,6 +232,26 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             payload = safe_payload
 
         remaining = post_issues(payload, SETA_VOICE, sources=sources, post_type=post_type)
+        # A story already told is not a new post. The URL exclusion above stops
+        # the common case (the same article still ranking top a week later);
+        # this catches the same story reached through a different article.
+        # Blocking, not cosmetic: republishing last week's post under a new
+        # headline is exactly the "they always say the same things" complaint.
+        try:
+            _prior = self._recent_history()["posts"]
+            _repeat = repeats_recent_story(
+                str(payload.get("headline", "")), str(payload.get("body", "")),
+                [q for q in _prior
+                 if q.get("headline") != str(payload.get("headline", ""))],
+            )
+        except Exception:      # history is an optimisation, never a hard dependency
+            _repeat = None
+        if _repeat:
+            remaining = list(remaining) + [
+                f"retells a post from the last 45 days - \"{_repeat}\" - "
+                f"find a different story"
+            ]
+
         blocking = blocking_issues(remaining)
         if blocking:
             # One retry has already happened above. If a post is still asserting
