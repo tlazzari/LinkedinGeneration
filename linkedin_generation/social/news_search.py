@@ -567,6 +567,77 @@ def search_news_google_custom(query: str, num_results: int = 5) -> List[dict]:
 
 
 
+
+# A source is a PUBLICATION, not a hostname. DuckDuckGo (added 2026-09-16) has no
+# publisher field, so its results carried netloc straight through and a post
+# opened "Chejiahao.m.autohome.com.cn reported in 2026" - which reads like a
+# broken link in the body, right where the rule says no link may appear. The link
+# rule was never violated; the attribution just looked like it was.
+_PUBLISHER_NAMES = {
+    "yicai.com": "Yicai (第一财经)",
+    "autohome.com.cn": "Autohome (汽车之家)",
+    "sohu.com": "Sohu (搜狐)",
+    "sina.com.cn": "Sina (新浪)",
+    "sina.cn": "Sina (新浪)",
+    "thepaper.cn": "The Paper (澎湃新闻)",
+    "caixin.com": "Caixin (财新)",
+    "eastmoney.com": "East Money (东方财富)",
+    "stcn.com": "Securities Times (证券时报)",
+    "cnstock.com": "China Securities Journal (中国证券报)",
+    "21jingji.com": "21st Century Business Herald (21世纪经济报道)",
+    "jiemian.com": "Jiemian (界面新闻)",
+    "36kr.com": "36Kr (36氪)",
+    "guancha.cn": "Guancha (观察者网)",
+    "ofweek.com": "OFweek",
+    "zhihu.com": "Zhihu (知乎)",
+    "toutiao.com": "Toutiao (今日头条)",
+    "nikkei.com": "Nikkei",
+    "cn.nikkei.com": "Nikkei Chinese (日经中文网)",
+    "reuters.com": "Reuters",
+    "ft.com": "Financial Times",
+    "bloomberg.com": "Bloomberg",
+    "theguardian.com": "The Guardian",
+    "dw.com": "Deutsche Welle",
+    "scmp.com": "South China Morning Post",
+    "mckinsey.com.cn": "McKinsey Greater China",
+    "mckinsey.com": "McKinsey",
+    "axios.com": "Axios",
+    "handelsblatt.com": "Handelsblatt",
+    "lesechos.fr": "Les Echos",
+    "ilsole24ore.com": "Il Sole 24 Ore",
+}
+
+# Subdomains that carry no editorial identity and only make the name ugly.
+_NOISE_SUBDOMAINS = {"www", "m", "mobile", "amp", "news", "cj", "k", "nev",
+                     "finance", "auto", "chejiahao", "zhuanlan", "gongyi", "en"}
+
+
+def publisher_name(url: str, given: str = "") -> str:
+    """A human publication name for a source, never a bare hostname.
+
+    `given` wins when a provider supplied a real name - only DuckDuckGo and the
+    legacy providers fall through to deriving one from the host.
+    """
+    if given and not re.fullmatch(r"[a-z0-9.-]+\.[a-z.]{2,}", given.strip(), re.I):
+        return given.strip()
+
+    host = urlparse(url).netloc.lower().split(":")[0]
+    parts = [x for x in host.split(".") if x]
+    while parts and parts[0] in _NOISE_SUBDOMAINS:
+        parts.pop(0)
+    host = ".".join(parts)
+    if host in _PUBLISHER_NAMES:
+        return _PUBLISHER_NAMES[host]
+    # Try progressively shorter suffixes: news.x.co.uk -> x.co.uk -> co.uk
+    for i in range(len(parts)):
+        cand = ".".join(parts[i:])
+        if cand in _PUBLISHER_NAMES:
+            return _PUBLISHER_NAMES[cand]
+    # Fall back to the registrable name, capitalised: autohome.com.cn -> Autohome
+    if parts:
+        return parts[0].replace("-", " ").title()
+    return given or "the press"
+
 def search_news_duckduckgo(query: str, num_results: int = 8,
                            lang: str = "zh") -> List[dict]:
     """Free web search with NO API key and no monthly plan to run out.
@@ -622,7 +693,7 @@ def search_news_duckduckgo(query: str, num_results: int = 8,
         results.append({
             "title": title,
             "url": url,
-            "source": urlparse(url).netloc.replace("www.", ""),
+            "source": publisher_name(url),
             "summary": "",
             "provider": "duckduckgo",
         })
@@ -676,7 +747,7 @@ def search_reference_marginalia(query: str, num_results: int = 5,
         out.append({
             "title": title,
             "url": url,
-            "source": urlparse(url).netloc.replace("www.", ""),
+            "source": publisher_name(url),
             "summary": (item.get("description") or "")[:300],
             "provider": "marginalia",
         })
@@ -1152,6 +1223,76 @@ def repeats_recent_story(headline: str, body: str, recent: Sequence[dict],
             return old.get("headline", "")
     return None
 
+
+# ─── Do not sit on one theme ────────────────────────────────────────────────
+# Story-level de-duplication stopped the same ARTICLE being written twice. It did
+# not stop three posts in five days on Chinese capital buying European auto parts
+# (13, 16 and 17 Sep) - different articles, different facts, same subject. That is
+# the "they always say the same things" complaint one level up.
+#
+# STEER rather than BLOCK, deliberately: on a quiet news week a hard rule would
+# mean no post rather than a slightly familiar one, and a missed slot is worse
+# than a second piece on a genuinely live theme. So a recently-worked theme sends
+# its query to the BACK of the rotation; it is only used if nothing fresher is
+# found.
+
+# Coarse subject buckets. Deliberately broad - the aim is "not autos again this
+# week", not a taxonomy.
+_THEMES = {
+    "auto": ("汽车", "零部件", "车企", "auto", "automotive", "car ", "vehicle",
+             "supplier", "parts maker"),
+    "energy": ("新能源", "电池", "光伏", "battery", "solar", "renewable",
+               "energy", "hydrogen"),
+    "machinery": ("机械", "机床", "装备", "machinery", "machine tool",
+                  "industrial equipment", "robotics", "automation"),
+    "chemicals": ("化工", "材料", "chemical", "materials", "polymer", "coating"),
+    "pharma": ("医药", "医疗", "pharma", "medical", "biotech", "device"),
+    "food": ("食品", "农业", "food", "beverage", "agri"),
+    "luxury": ("奢侈品", "时尚", "luxury", "fashion", "leather", "brand"),
+    "policy": ("监管", "审查", "政策", "regulation", "screening", "tariff",
+               "antitrust", "foreign subsid"),
+    "macro": ("汇率", "利率", "gdp", "exchange rate", "yield", "inflation"),
+}
+
+
+def post_theme(text: str) -> Optional[str]:
+    """The coarse subject of a post, or None if it fits no bucket."""
+    low = (text or "").lower()
+    best, best_hits = None, 0
+    for theme, markers in _THEMES.items():
+        hits = sum(1 for m in markers if m in low)
+        if hits > best_hits:
+            best, best_hits = theme, hits
+    return best
+
+
+def recent_themes(posts: Sequence[dict], limit: int = 4) -> List[str]:
+    """Themes of the last `limit` posts, most recent first."""
+    out: List[str] = []
+    for post in list(posts)[-limit:][::-1]:
+        theme = post_theme(f"{post.get('headline','')} {post.get('body','')}")
+        if theme:
+            out.append(theme)
+    return out
+
+
+def demote_worked_themes(queries: Sequence[str], recent: Sequence[str]) -> List[str]:
+    """Reorder queries so recently-worked themes are tried last.
+
+    Nothing is removed. A theme the pillar is built on must stay reachable, or a
+    quiet week produces no post at all.
+    """
+    if not recent:
+        return list(queries)
+    tired = set(recent)
+    fresh = [q for q in queries if post_theme(q) not in tired]
+    stale = [q for q in queries if post_theme(q) in tired]
+    if fresh and stale:
+        logger.info("Theme rotation: %s worked recently - trying %d other "
+                    "quer%s first", ", ".join(sorted(tired)), len(fresh),
+                    "y" if len(fresh) == 1 else "ies")
+    return fresh + stale
+
 def search_news_for_pillar(
     pillar_name: str,
     num_articles: int = 3,
@@ -1160,6 +1301,7 @@ def search_news_for_pillar(
     avoid_finance: bool = False,
     avoid_companies: Optional[Sequence[str]] = None,
     exclude_urls: Optional[set] = None,
+    recent_themes_used: Optional[Sequence[str]] = None,
 ) -> List[NewsArticle]:
     """Find recent, specific news for a content pillar.
 
@@ -1218,6 +1360,10 @@ def search_news_for_pillar(
     if not zh_queries and not en_queries:
         logger.warning(f"No search queries defined for pillar: {pillar_name}")
         return []
+
+    # Push a theme worked in the last few posts to the back of each rotation.
+    zh_queries = demote_worked_themes(zh_queries, recent_themes_used or [])
+    en_queries = demote_worked_themes(en_queries, recent_themes_used or [])
 
     all_results: List[dict] = []
     seen_urls = set()
@@ -1318,7 +1464,27 @@ def search_news_for_pillar(
         for query in (zh_queries + en_queries)[:1]:
             absorb(search_news_gemini(query, num_results=5))
 
-    all_results.sort(key=_rank_key)
+    # Theme rotation acts HERE, on results, not on queries. The first cut
+    # reordered the pillar's queries - useless, because this pillar's queries
+    # (中国 企业 收购 欧洲) carry no theme at all: the auto slant came from what
+    # the search returned, not from what was asked. A fresher subject therefore
+    # has to win at ranking time.
+    #
+    # Still a demotion, never a filter: if every article this week is about autos
+    # then an auto post is the honest post, and a missed slot would be worse.
+    _tired = set(recent_themes_used or [])
+    if _tired:
+        _before = [r.get("title", "")[:40] for r in all_results[:2]]
+        all_results.sort(
+            key=lambda r: (post_theme(f"{r.get('title','')} {r.get('summary','')}") in _tired,)
+                          + tuple(_rank_key(r))
+        )
+        _after = [r.get("title", "")[:40] for r in all_results[:2]]
+        if _before != _after:
+            logger.info("Theme rotation: %s worked recently - promoted a different "
+                        "subject to the top", ", ".join(sorted(_tired)))
+    else:
+        all_results.sort(key=_rank_key)
 
     articles: List[NewsArticle] = []
     for r in all_results[:num_articles]:

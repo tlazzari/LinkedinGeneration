@@ -2201,4 +2201,58 @@ t.check('SECRET: a bearer token is redacted',
 t.check('SECRET: every provider error path redacts',
         _i2.getsource(_ns_mod).count('_redact(') >= 5)
 
+
+# ─── A hostname is not a publication ────────────────────────────────────────
+# 17 Sep: "Chejiahao.m.autohome.com.cn reported in 2026..." No rule was broken -
+# the links were in the first comment as always - but a raw domain in the body
+# READS like a link, in the one place the house rule forbids one. Looking like a
+# broken rule is its own defect.
+from linkedin_generation.social.post_quality import bare_domain_as_source
+from linkedin_generation.social.news_search import (
+    publisher_name, post_theme, recent_themes, demote_worked_themes,
+)
+
+t.check('SOURCE: a raw hostname in the body is caught',
+        bare_domain_as_source('Chejiahao.m.autohome.com.cn reported in 2026.'))
+t.check('SOURCE: a single-dot domain is caught too',
+        bare_domain_as_source('sohu.com covered the deal.'))
+t.check('SOURCE: a properly named outlet passes',
+        not bare_domain_as_source('Yicai (第一财经) reported on 9 September.'))
+t.check('SOURCE: ordinary prose is not mistaken for a domain',
+        not bare_domain_as_source('Revenue grew 4.2 per cent. He joined in Jan. 2024.')
+        and not bare_domain_as_source('Seta Capital Srls and Seta Capital Ltd differ.'))
+t.check('SOURCE: citing a hostname is BLOCKING, not a style note',
+        bool(blocking_issues(["'sohu.com' is a hostname, not a publication - name the outlet"])))
+
+t.check('SOURCE: the hostname is turned into a real publication name',
+        publisher_name('https://chejiahao.m.autohome.com.cn/x') == 'Autohome (汽车之家)')
+t.check('SOURCE: an unknown outlet still gets a readable name, not a host',
+        publisher_name('https://some-trade-journal.de/a') == 'Some Trade Journal')
+t.check('SOURCE: a name supplied by the provider wins',
+        publisher_name('https://x.com/a', 'Deutsche Welle') == 'Deutsche Welle')
+t.check('SOURCE: but a hostname supplied as the name is replaced',
+        publisher_name('https://www.yicai.com/a', 'yicai.com') == 'Yicai (第一财经)')
+
+# ─── Theme rotation ─────────────────────────────────────────────────────────
+# Three posts in five days on Chinese capital buying European auto parts:
+# different articles, different facts, same subject.
+t.check('THEME: an auto story is recognised as one',
+        post_theme('Chinese carmakers buy European 零部件 suppliers') == 'auto')
+t.check('THEME: a policy story is not filed as auto',
+        post_theme('EU tightens foreign subsidies screening and antitrust review')
+        == 'policy')
+_recent = ['auto', 'auto', 'macro']
+_qs = ['中国 汽车 零部件 收购', '中欧 医药 并购', '欧洲 机械 装备 收购']
+_out = demote_worked_themes(_qs, _recent)
+t.check('THEME: a recently-worked theme is pushed to the back',
+        _out[-1] == '中国 汽车 零部件 收购')
+t.check('THEME: nothing is REMOVED - a quiet week must still produce a post',
+        sorted(_out) == sorted(_qs))
+t.check('THEME: with no history the order is untouched',
+        demote_worked_themes(_qs, []) == _qs)
+t.check('THEME: a pillar whose every query is tired still gets them all',
+        len(demote_worked_themes(['中国 汽车 收购'], ['auto'])) == 1)
+t.check('THEME: the search accepts the recent themes',
+        'recent_themes_used' in _i2.signature(_ns_mod.search_news_for_pillar).parameters)
+
 sys.exit(t.summary())

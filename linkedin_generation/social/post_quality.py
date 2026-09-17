@@ -870,6 +870,7 @@ BLOCKING_MARKERS = (
     "official framing",                        # republishing a state line unattributed
     "vague source",                            # "studies show" with no study
     "retells a post",                          # the same story twice in a fortnight
+    "is a hostname, not a publication",        # a raw domain cited as an outlet
 )
 
 
@@ -882,6 +883,36 @@ def cosmetic_issues(issues: Sequence[str]) -> List[str]:
     """Issues worth a warning but not worth losing the slot over."""
     blocking = set(blocking_issues(issues))
     return [i for i in issues if i not in blocking]
+
+
+# ─── A hostname is not a publication ────────────────────────────────────────
+# 17 Sep, a Seta post opened: "Chejiahao.m.autohome.com.cn reported in 2026 on
+# Chinese capital flowing into Europe." No rule was broken - _strip_urls had done
+# its job and the real links were in the first comment - but a raw domain sitting
+# in the body READS like a link, in the one place the house rule says no link may
+# appear. Tom saw it and reasonably assumed the first-comment rule had failed.
+#
+# Looking like a broken rule is its own defect. Cited sources must be named the
+# way a person would name them.
+_BARE_DOMAIN = re.compile(
+    r"\b(?!(?:e\.g|i\.e)\b)"
+    # '*' not '+': sohu.com has a single dot and was slipping through while
+    # nev.ofweek.com was caught.
+    r"[A-Za-z0-9][A-Za-z0-9-]*(?:\.[A-Za-z0-9-]+)*"
+    r"\.(?:com|cn|net|org|io|co|de|fr|it|uk|jp|eu|info|biz)(?:\.[a-z]{2})?\b"
+)
+
+
+def bare_domain_as_source(text: str) -> List[str]:
+    """Hostnames used as if they were the name of a publication."""
+    hits: List[str] = []
+    for m in _BARE_DOMAIN.finditer(text or ""):
+        token = m.group(0)
+        # A URL would have been stripped already; what is left is a bare host.
+        if "/" in token or token.lower().startswith(("http", "www.")):
+            continue
+        hits.append(token)
+    return hits
 
 def post_issues(
     payload: Dict[str, object],
@@ -915,6 +946,12 @@ def post_issues(
     # not need to know these failure modes exist to be protected from them, and
     # there is no brand for which inverted economics or invented causality is
     # acceptable copy. See the two functions above for the post that caused them.
+    for bad in bare_domain_as_source(whole):
+        issues.append(
+            f"'{bad}' is a hostname, not a publication - name the outlet as a "
+            f"reader would say it; the link belongs in the first comment"
+        )
+
     for bad in contradicted_directional_claims(whole, sources or ""):
         issues.append("claim contradicts the data it cites - " + bad)
 

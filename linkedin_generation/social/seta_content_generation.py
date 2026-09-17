@@ -13,6 +13,7 @@ from .news_search import (
     NewsArticle,
     build_news_context,
     recent_post_history,
+    recent_themes,
     repeats_recent_story,
     search_news_for_pillar,
 )
@@ -99,6 +100,10 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                 pillar.name,
                 num_articles=3,
                 exclude_urls=_hist["urls"],
+                # A theme worked in the last few posts goes to the back of the
+                # query rotation - steered, never blocked, so a quiet week still
+                # produces a post rather than nothing.
+                recent_themes_used=recent_themes(_hist["posts"], limit=4),
                 queries=list(getattr(pillar, "news_queries", []) or []),
             )
             news_context = build_news_context(news_articles)

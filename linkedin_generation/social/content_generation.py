@@ -85,8 +85,12 @@ class LinkedInPostGenerator(BaseContentGenerator):
             news_articles = search_news_for_pillar(
                 pillar.name,
                 num_articles=3,
-                exclude_urls=_hist["urls"],
                 queries=list(getattr(pillar, "news_queries", []) or []),
+                exclude_urls=_hist["urls"],
+                # A subject covered in the last few posts is demoted at ranking
+                # time - steered, never filtered, so a quiet week still produces
+                # a post rather than nothing.
+                recent_themes_used=recent_themes(_hist["posts"], limit=4),
                 # TNT sells components, so an IPO or a results call gives it
                 # nothing to say, and a story about a competitor must never be the
                 # anchor. Both are excluded before the model ever sees them.
