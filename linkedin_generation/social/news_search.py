@@ -382,6 +382,23 @@ def resolve_publisher_url(url: str, timeout: int = 15) -> str:
 _SERPAPI_EXHAUSTED = False
 
 
+
+# Provider errors quote the URL they failed on, and for these APIs the credential
+# IS a query parameter. A 401 from Google Custom Search printed the whole key;
+# under cron that line goes to logs/seta.log, so a single failed call would write
+# a live credential to disk. Nothing had leaked yet only because Custom Search has
+# no key configured and the SerpAPI quota ran out after the day's cron had already
+# run - timing, not design.
+_SECRET_PARAM = re.compile(
+    r"((?:api_?key|key|token|access_token|password)=)([^&\s\"']{6,})", re.I
+)
+
+
+def _redact(text: object) -> str:
+    """An exception message with any credential in it replaced."""
+    return _SECRET_PARAM.sub(lambda m: f"{m.group(1)}<redacted:{len(m.group(2))} chars>",
+                             str(text))
+
 def search_news_serpapi(
     query: str, num_results: int = 8, lang: str = "zh", max_age: str = "qdr:m"
 ) -> List[dict]:
@@ -430,7 +447,7 @@ def search_news_serpapi(
                 globals()["_SERPAPI_EXHAUSTED"] = True
                 logger.warning("SerpAPI plan exhausted (429) - skipping it for this run")
             else:
-                logger.warning(f"SerpAPI news search failed for '{query}': {exc}")
+                logger.warning("SerpAPI news search failed for %r: %s", query, _redact(exc))
             return []
     if data is None:
         logger.warning("SerpAPI timed out twice on '%s' - giving up on this query", query)
@@ -462,7 +479,7 @@ def search_news_serpapi(
         logger.info(f"SerpAPI[{lang}] found {len(out)} articles for: {query}")
         return out
     except Exception as e:
-        logger.warning(f"SerpAPI news search failed for '{query}': {e}")
+        logger.warning("SerpAPI news search failed for %r: %s", query, _redact(e))
         return []
 
 
@@ -484,7 +501,7 @@ def search_news_serper(query: str, num_results: int = 5) -> List[dict]:
         data = response.json()
         return data.get("news", [])
     except Exception as e:
-        logger.error(f"Serper news search failed: {e}")
+        logger.error("Serper news search failed: %s", _redact(e))
         return []
 
 
@@ -512,7 +529,7 @@ def search_news_tavily(query: str, num_results: int = 5) -> List[dict]:
         data = response.json()
         return data.get("results", [])
     except Exception as e:
-        logger.error(f"Tavily news search failed: {e}")
+        logger.error("Tavily news search failed: %s", _redact(e))
         return []
 
 
@@ -545,7 +562,7 @@ def search_news_google_custom(query: str, num_results: int = 5) -> List[dict]:
         data = response.json()
         return data.get("items", [])
     except Exception as e:
-        logger.error(f"Google Custom Search failed: {e}")
+        logger.error("Google Custom Search failed: %s", _redact(e))
         return []
 
 

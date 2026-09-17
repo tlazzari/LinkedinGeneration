@@ -2182,4 +2182,23 @@ t.check('ORDER: and on a single query, not three',
 t.check('ORDER: the free-before-billed rule is stated where it executes',
         'LAST RESORT' in _body or 'LAST RESORT' in (_ns_mod.search_news_for_pillar.__doc__ or ''))
 
+
+# Credentials must never reach a log file. These APIs take the key as a query
+# parameter, and a provider error quotes the URL it failed on - a 401 from Google
+# Custom Search printed the whole key on 17 Sep. Under cron that line lands in
+# logs/seta.log, so one failed call would write a live credential to disk.
+from linkedin_generation.social.news_search import _redact
+_leaky = ('https://www.googleapis.com/customsearch/v1'
+          '?key=AQ.Ab8RN6KMd2B2FTnUdJlA6U1O4QSY5kXFuU&cx=10b92a75&q=x')
+t.check('SECRET: an API key in a URL is redacted before logging',
+        'AQ.Ab8RN6KMd2B2FTnUdJlA6U1O4QSY5kXFuU' not in _redact(_leaky))
+t.check('SECRET: the non-secret parts survive, so the error stays diagnosable',
+        'customsearch/v1' in _redact(_leaky) and 'cx=10b92a75' in _redact(_leaky))
+t.check('SECRET: serpapi api_key is redacted too',
+        'fb763aa0' not in _redact('...&api_key=fb763aa09ceb38d88447c3883c8dfc9652'))
+t.check('SECRET: a bearer token is redacted',
+        'sekrit' not in _redact('?access_token=sekrit1234567'))
+t.check('SECRET: every provider error path redacts',
+        _i2.getsource(_ns_mod).count('_redact(') >= 5)
+
 sys.exit(t.summary())
