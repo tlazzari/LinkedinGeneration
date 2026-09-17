@@ -530,4 +530,18 @@ for _s, _flag in [
     t.check(f'ABSOLUTE: {"flags" if _flag else "allows"} - {_s[:44]}',
             bool(absolute_claims(_s)) == _flag)
 
+
+# Tom, 2026-09-17, on two borderline phrases in a live draft: "they can be
+# admitted". Both describe TNT's ordinary working voice - no customer, no
+# country, no figure, no claimed achievement - and this pillar is called
+# Forensic Stories from the Field. Pinned so a later tightening of the feat gate
+# cannot quietly take them out.
+for _allowed in [
+    "Our engineers found clear signs of moisture.",
+    "We prevent such costly failures.",
+    "Our technical team helps select the right sealing solutions.",
+]:
+    t.check(f'VOICE: admitted by decision - {_allowed[:44]}',
+            not unbacked_first_person_claims(_allowed, "", "TNT Motion"))
+
 sys.exit(t.summary())
