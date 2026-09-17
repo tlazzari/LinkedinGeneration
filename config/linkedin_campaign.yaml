@@ -146,15 +146,33 @@ content_pillars:
     machinery in demanding environments - from Arctic installations to cleanroom robotics.
 
     '
-  angle: 'Showcase bearings operating in extreme conditions with specific technical data.
+  # 2026-09-17: this angle used to ask for "real performance numbers" and for the
+  # reader to think "I did not know bearings could do that". It got them - a post
+  # claiming TNT engineers developed a cleanroom solution that "stops particle
+  # generation completely" and extends uptime "by 3x". None of it is backed by
+  # anything. A pillar that asks for specifics nobody holds will be answered with
+  # invented ones, and no downstream gate can fix a prompt that demands fiction.
+  # Same correction already applied to the failure pillars: describe the
+  # MECHANISM, claim no project as ours.
+  angle: 'Explain how bearings survive one demanding condition - heat, cold, speed,
 
-    Start with the challenge: "-40C Arctic compressor station" or "50,000 RPM dental
+    vacuum, washdown or contamination. Start from the physics: what the condition does
 
-    turbine" or "Class 100 cleanroom robot arm". Include the engineering solution and
+    to a bearing, why a standard one fails there, and which design choices answer it
 
-    real performance numbers. Reference cutting-edge materials: hybrid ceramics, special
+    (cage material, lubricant type, clearance class, sealing, coatings).
 
-    coatings, advanced lubricants. Make readers think "I did not know bearings could do that."
+    Describe this GENERICALLY, as engineering that applies to anyone facing the
+
+    condition. Do NOT narrate a specific project, customer or site as ours, and do
+
+    NOT attach a performance figure - no hours, temperatures, multipliers or
+
+    percentages - unless it is a published standard or a figure whose arithmetic
+
+    the post shows. Where a real limit is worth naming, name the STANDARD (ISO
+
+    class, DIN grade) rather than a result we claim to have achieved.
 
     '
   proof_points:

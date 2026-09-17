@@ -518,10 +518,25 @@ VAGUE_SOURCE_PATTERNS = [
 # A statistic worth checking: a percentage, a number carried to two or more
 # decimals (an FX rate), or a currency amount - TNT's archive is full of
 # invented failure costs ("THE EUR200,000 NIGHTMARE").
+# A technical brand's inventions are not percentages, they are ENGINEERING
+# figures. "Our bearings extend robot arm uptime by 3x" sailed through while the
+# identical claim written "300%" was caught - the detector only knew money and
+# percent. A multiplier, a temperature, a life in hours and a speed in rpm are
+# all quantified claims a reader will believe, so all of them have to trace back
+# to something.
 _STATISTIC = re.compile(
     r"\d[\d,]*(?:\.\d+)?\s*%"
     r"|[€$£]\s?\d[\d,]*(?:\.\d+)?"
     r"|\d[\d,]*(?:\.\d+)?\s*(?:euros?|EUR|USD|dollars?|RMB|CNY|GBP|pounds?)\b"
+    # multipliers: 3x, 3-fold, threefold is caught by the word list below
+    r"|\b\d+(?:\.\d+)?\s*(?:x|×)\b"
+    r"|\b\d+(?:\.\d+)?[- ]fold\b"
+    # physical quantities an engineer would check
+    r"|\d[\d, ]*(?:\.\d+)?\s*(?:hours?|hrs?|h\b|years?|months?"
+    r"|°\s?[CF]|deg\s?[CF]|degrees?\s?[CF]?"
+    r"|rpm|r/min|bar\b|psi\b|mpa\b|kn\b|nm\b"
+    r"|microns?|µm|um\b|mm\b|kg\b|tonnes?|tons?"
+    r"|db\b|watts?|kw\b|volts?)\b"
     r"|\d+\.\d{2,}",
     re.IGNORECASE,
 )
@@ -871,6 +886,8 @@ BLOCKING_MARKERS = (
     "vague source",                            # "studies show" with no study
     "retells a post",                          # the same story twice in a fortnight
     "is a hostname, not a publication",        # a raw domain cited as an outlet
+    "absolute claim no mechanism supports",    # "stops particle generation completely"
+    "claims we did something",                 # unverifiable first-person feat
 )
 
 
@@ -914,17 +931,137 @@ def bare_domain_as_source(text: str) -> List[str]:
         hits.append(token)
     return hits
 
+
+# ─── Claims no engineer would make ──────────────────────────────────────────
+# "This combination stops particle generation completely." Nothing mechanical
+# stops anything completely, and a technical audience knows it - an absolute is
+# read as marketing, which is the one register this brand cannot afford in a
+# post about physics. Allowed when the post attributes it to a standard or a
+# measurement ("to ISO 14644 Class 5", "below the 0.1 micron detection limit").
+_ABSOLUTE = re.compile(
+    r"\b(?:completely|entirely|totally|fully)\s+"
+    r"(?:stops?|eliminat\w+|prevent\w+|remov\w+|avoid\w+|solv\w+)"
+    # "stops particle generation completely" - English puts the adverb either
+    # side of the verb, and the first cut only caught one order.
+    r"|\b(?:stops?|eliminat\w+|prevent\w+|remov\w+|avoid\w+|solv\w+)\b"
+    r"[\w\s,-]{0,40}?\b(?:completely|entirely|totally|altogether)\b"
+    r"|\b(?:eliminat\w+|prevent\w+)\s+(?:all|any|every)\b"
+    r"|\bzero\s+(?:wear|failure|downtime|maintenance|particles?|emission)"
+    r"|\bnever\s+(?:fails?|wears?|needs?\s+maintenance|breaks?)"
+    r"|\b100\s?%\s+(?:reliab\w+|effective|guaranteed)"
+    r"|\bguarantee(?:s|d)?\b"
+    r"|\bmaintenance[- ]free\b",
+    re.IGNORECASE,
+)
+_MEASURED = re.compile(
+    r"\b(?:ISO|DIN|ASTM|ABMA|JIS|EN)\s?\d|class\s?\d|detection limit"
+    r"|\bmeasured\b|\btested to\b|\brated\b|\bper the standard\b",
+    re.IGNORECASE,
+)
+
+
+def absolute_claims(text: str) -> List[str]:
+    """Absolutes asserted without a standard or a measurement behind them."""
+    out: List[str] = []
+    for sentence in split_sentences(text):
+        if _ABSOLUTE.search(sentence) and not _MEASURED.search(sentence):
+            out.append(sentence.strip()[:120])
+    return out
+
+
+# ─── Things we say WE did ───────────────────────────────────────────────────
+# "TNT Motion engineers developed a unique solution. We used advanced polymer
+# cages." Whether or not that is true, nothing in the pipeline can establish it,
+# and a first-person achievement is the most quoted and least checkable kind of
+# claim a company makes. It needs a record behind it, not a pillar's marketing
+# copy - see the note on angle material in content_generation.
+_FIRST_PERSON_FEAT = re.compile(
+    r"\b(?:we|our (?:engineers?|team|technicians?|lab|r&d))\s+"
+    r"(?:develop\w*|design\w*|engineer\w*|invent\w*|creat\w*|built?|build"
+    r"|achiev\w*|deliver\w*|test\w*|validat\w*|proved\b|proven\b|solv\w*|cut\b"
+    r"|reduc\w*|extend\w*|doubl\w*|tripl\w*"
+    # "We used advanced polymer cages" asserts a specific engineering choice as
+    # ours just as firmly as "we developed" - it was slipping through.
+    r"|used?\b|using\b|appli\w*|specif\w*|select\w*|fitted\b|chose\b)",
+    re.IGNORECASE,
+)
+
+
+def unbacked_first_person_claims(text: str, verified: str,
+                                 brand: str = "") -> List[str]:
+    """First-person engineering achievements with no verified record behind them.
+
+    `verified` is material that actually establishes facts - fetched articles,
+    the knowledge base - NOT a pillar's own angle or proof-point copy, which is
+    marketing written in the same voice and proves nothing.
+    """
+    out: List[str] = []
+    low_verified = (verified or "").lower()
+    # A company talking about itself in the third person is still talking about
+    # itself: "TNT Motion engineers developed a unique solution" is the same
+    # claim as "we developed", and only the first-person form was caught.
+    brand_feat = None
+    if brand:
+        # NOT "engineer\w*" here. "TNT Motion offers bearings engineered for
+        # harsh environments" is ordinary product copy and the brand is openly a
+        # sales channel - flagging it would block correct posts, which is worse
+        # than the defect. The brand form therefore only catches verbs that
+        # assert a FEAT, and only when no offering verb sits in between.
+        brand_feat = re.compile(
+            re.escape(brand)
+            + r"(?![\w\s]{0,24}?\b(?:offers?|provides?|supplies|sells?|stocks?|has|have)\b)"
+              r"[\w\s]{0,24}?\b(?:develop\w*|invent\w*|creat\w*|achiev\w*"
+              r"|validat\w*|solv\w*|doubl\w*|tripl\w*|pioneer\w*)",
+            re.IGNORECASE,
+        )
+    # The passive dodge: "our approach is proven in the field" makes the same
+    # unverifiable claim as "we proved it" while slipping past a subject-verb
+    # pattern. Narrow on purpose - it needs both a first-person possessive and a
+    # validation word, so "proven technology is widely used" stays clean.
+    passive_feat = re.compile(
+        r"\b(?:our|we)\b[\w\s,'-]{0,40}?"
+        r"\b(?:proven|validated|field[- ]tested|battle[- ]tested|certified)\b",
+        re.IGNORECASE,
+    )
+    for sentence in split_sentences(text):
+        m = _FIRST_PERSON_FEAT.search(sentence)
+        if not m and brand_feat:
+            m = brand_feat.search(sentence)
+        if not m:
+            m = passive_feat.search(sentence)
+        if not m:
+            continue
+        # If the verified material carries the same distinctive terms, allow it.
+        terms = {w for w in re.findall(r"[a-z]{6,}", sentence.lower())
+                 if w not in ("engineers", "solution", "support", "provide")}
+        if terms and low_verified and len(
+            [w for w in terms if w in low_verified]
+        ) >= max(2, len(terms) // 3):
+            continue
+        out.append(sentence.strip()[:120])
+    return out
+
 def post_issues(
     payload: Dict[str, object],
     voice: BrandVoice,
     sources: Optional[str] = None,
     post_type: str = "",
+    verified: Optional[str] = None,
 ) -> List[str]:
     """Every reason this post is not repost-worthy. Empty list == publishable.
 
-    `sources` is the data actually fetched for this post (chart figures, news
-    context, curated proof points). Pass it to check that every statistic the
-    post asserts traces back to real data; omit it to skip that check.
+    `sources` is what the post may draw on. `verified` is the subset of that
+    which actually ESTABLISHES a fact - fetched articles, live chart figures, the
+    knowledge base.
+
+    The two were one argument until 2026-09-17, and a pillar's own proof_points
+    were passed as evidence. They are marketing copy: "a ceramic hybrid solution
+    that cut vibration by 70%", "how we achieved 80 000+ hour life at 280 C".
+    So a post repeating 70% was judged sourced, by a source that was itself
+    written to sell. A brand cannot be its own citation. Statistics and
+    first-person achievements are now checked against `verified` only; the angle
+    material still steers what the post is ABOUT, it just no longer licenses a
+    number.
 
     `post_type` lets holiday greetings off the rules written for analysis posts:
     a Ferragosto message does not need a discussion question and is allowed to
@@ -936,6 +1073,10 @@ def post_issues(
     body = str(payload.get("body", "") or "")
     cta = str(payload.get("cta", "") or "")
     whole = f"{headline} {body} {cta}"
+    # What may be cited as PROOF. Falls back to  for callers that have
+    # not separated the two yet, so a brand without a verified channel keeps its
+    # previous behaviour rather than silently losing the check.
+    _evidence = verified if verified is not None else sources
 
     if voice.ban_promotional:
         hits = promotional_hits(whole)
@@ -946,6 +1087,18 @@ def post_issues(
     # not need to know these failure modes exist to be protected from them, and
     # there is no brand for which inverted economics or invented causality is
     # acceptable copy. See the two functions above for the post that caused them.
+    for bad in absolute_claims(whole):
+        issues.append(
+            "absolute claim no mechanism supports - qualify it or cite the "
+            f"standard it is measured against: \"{bad}\""
+        )
+
+    for bad in unbacked_first_person_claims(whole, _evidence or "", voice.name):
+        issues.append(
+            "claims WE did something, with no record behind it - describe the "
+            f"engineering generically instead: \"{bad}\""
+        )
+
     for bad in bare_domain_as_source(whole):
         issues.append(
             f"'{bad}' is a hostname, not a publication - name the outlet as a "
@@ -1090,9 +1243,12 @@ def post_issues(
             )
             break
 
-    if sources is not None:
+    # _evidence, NOT sources. A pillar's proof_points are marketing copy written
+    # in the brand's own voice; they may steer what a post is about but they
+    # cannot establish that a figure is real. A brand is not its own citation.
+    if _evidence is not None:
         whole_text = f"{headline} {body} {cta}"
-        invented = unsupported_statistics(whole_text, sources)
+        invented = unsupported_statistics(whole_text, _evidence)
         if invented:
             issues.append(
                 "statistics with no source in the fetched data — remove or replace "

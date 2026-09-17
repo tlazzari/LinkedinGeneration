@@ -119,8 +119,16 @@ class LinkedInPostGenerator(BaseContentGenerator):
         # Everything the post is allowed to cite. Without news_context here the
         # unsupported-statistics check would flag figures that came from the very
         # articles we handed the model.
+        # What the post may draw on, and what actually PROVES anything. The
+        # pillar's proof_points are angle material written in TNT's own voice -
+        # they tell the model what to write about, they do not establish that any
+        # of it happened. Passing them as evidence let a post repeat "cut
+        # vibration by 70%" and be judged sourced by the marketing copy that
+        # invented it.
         sources = "\n".join(filter(None, ["\n".join(pillar.proof_points or []), news_context]))
-        issues = post_issues(payload, TNT_VOICE, sources=sources, post_type=post_type)
+        verified = news_context or ""
+        issues = post_issues(payload, TNT_VOICE, sources=sources, post_type=post_type,
+                    verified=verified)
         if issues:
             logger.warning(
                 "TNT post failed the quality gate (%s) - regenerating once",
@@ -139,11 +147,13 @@ class LinkedInPostGenerator(BaseContentGenerator):
                 max_tokens=650,
             )
             retry_payload = self._strip_urls(self._parse_response(retry_raw))
-            if len(post_issues(retry_payload, TNT_VOICE, sources=sources, post_type=post_type)) < len(issues):
+            if len(post_issues(retry_payload, TNT_VOICE, sources=sources,
+                           post_type=post_type, verified=verified)) < len(issues):
                 payload = retry_payload
 
         payload = apply_fixes(payload, TNT_VOICE)
-        remaining = post_issues(payload, TNT_VOICE, sources=sources, post_type=post_type)
+        remaining = post_issues(payload, TNT_VOICE, sources=sources, post_type=post_type,
+                    verified=verified)
 
         # INVENTED ENGINEERING FIGURES GET THEIR OWN RETRY (2026-09-13).
         # The prompt has told the model since day one that every number must come
@@ -174,7 +184,8 @@ class LinkedInPostGenerator(BaseContentGenerator):
                 max_tokens=650,
             )
             fix_payload = apply_fixes(self._strip_urls(self._parse_response(fix_raw)), TNT_VOICE)
-            fix_remaining = post_issues(fix_payload, TNT_VOICE, sources=sources, post_type=post_type)
+            fix_remaining = post_issues(fix_payload, TNT_VOICE, sources=sources,
+                             post_type=post_type, verified=verified)
             if not [i for i in fix_remaining if i.startswith("statistics with no source")]:
                 payload, remaining = fix_payload, fix_remaining
                 logger.info("TNT post: invented figures removed on the focused retry")

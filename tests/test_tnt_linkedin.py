@@ -411,4 +411,108 @@ t.check('CASE: the prompt shows what to write INSTEAD, not just what to avoid',
 t.check('CASE: a real case from the supplied material may still be used',
         'use it exactly as given' in _cg)
 
+
+# ─── The cleanroom post, 17 Sep ─────────────────────────────────────────────
+# "TNT Motion engineers developed a unique solution... This combination stops
+# particle generation completely. Our bearings extend robot arm uptime by 3x."
+# Tom: "the TNT post claim is absurd and unsubstantiated by anything".
+#
+# FOUR separate checks had to miss it for that to publish, and the root cause was
+# upstream of all of them: the pillar's own proof_points were being passed as
+# EVIDENCE. They are marketing copy in TNT's voice ("a ceramic hybrid solution
+# that cut vibration by 70%"), so a post repeating them was judged sourced by the
+# copy that invented them. A brand cannot be its own citation.
+from linkedin_generation.social.post_quality import (
+    absolute_claims, unbacked_first_person_claims, unsupported_statistics,
+    statistic_values, post_issues, blocking_issues, TNT_VOICE,
+)
+
+_CLEANROOM = ("TNT Motion engineers developed a unique solution. We used advanced "
+              "polymer cages. This combination stops particle generation completely. "
+              "Our bearings extend robot arm uptime by 3x.")
+
+t.check('CLAIM: an engineering multiplier is a statistic (3x was invisible)',
+        '3x' in " ".join(statistic_values("uptime by 3x")))
+t.check('CLAIM: 3x and 300% are judged the same way',
+        bool(unsupported_statistics("uptime by 3x", ""))
+        and bool(unsupported_statistics("uptime by 300%", "")))
+t.check('CLAIM: hours and temperatures count too',
+        bool(statistic_values("80 000 hours at 280 C")))
+t.check('CLAIM: an absolute with no standard behind it is caught',
+        bool(absolute_claims("This combination stops particle generation completely.")))
+t.check('CLAIM: an absolute measured against a standard is allowed',
+        not absolute_claims("Particle release stays below ISO 14644 Class 5 limits."))
+t.check('CLAIM: a first-person feat with no record is caught',
+        bool(unbacked_first_person_claims("We used advanced polymer cages.", "", "TNT Motion")))
+t.check('CLAIM: the brand in third person is the same claim',
+        bool(unbacked_first_person_claims(
+            "TNT Motion engineers developed a unique solution.", "", "TNT Motion")))
+t.check('CLAIM: ordinary product copy is NOT a feat claim',
+        not unbacked_first_person_claims(
+            "TNT Motion offers bearings engineered for harsh environments.", "", "TNT Motion")
+        and not unbacked_first_person_claims(
+            "TNT Motion provides technical support.", "", "TNT Motion"))
+t.check('CLAIM: describing a mechanism generically stays clean',
+        not unbacked_first_person_claims(
+            "Water corrodes the inner race and the bearing seizes.", "", "TNT Motion"))
+
+_iss = post_issues({'headline': 'X', 'body': _CLEANROOM, 'cta': 'Call us. And you?'},
+                   TNT_VOICE, sources='', post_type='promotional', verified='')
+t.check('CLAIM: the whole cleanroom post is REFUSED, not warned about',
+        len(blocking_issues(_iss)) >= 3)
+
+# The structural fix: a pillar's own copy may steer, never prove.
+_marketing = ("Robotic arms in a Class-10 cleanroom required near-zero particle "
+              "generation - special polymer cages and dry-film lubrication made it possible")
+# Check for the SPECIFIC issue, not any issue. The first version asserted that
+# post_issues returned SOMETHING - which it always does, since the body is a
+# single block - so it passed while the statistics gate was still reading
+# proof_points. A test that cannot fail for the reason it names is not a test.
+_pp_issues = post_issues({'headline': 'X', 'body': 'Vibration fell by 70%.',
+                          'cta': 'Call us. And you?'},
+                         TNT_VOICE, sources=_marketing, post_type='promotional',
+                         verified='')
+t.check('EVIDENCE: proof_points passed as `sources` no longer license a figure',
+        any('no source' in i for i in _pp_issues))
+t.check('EVIDENCE: a real fetched article still supports its own figure',
+        not [i for i in post_issues(
+            {'headline': 'X', 'body': 'Vibration fell by 70%.', 'cta': 'Call us. And you?'},
+            TNT_VOICE, sources='', post_type='promotional',
+            verified='the trial showed vibration fell by 70% in testing')
+            if 'no source' in i])
+
+# And the prompt that asked for the invention in the first place.
+_yaml = (PKG_DIR.parent / 'config' / 'linkedin_campaign.yaml').read_text()
+# The phrase survives in the comment explaining its removal, so check the ANGLE
+# the model actually receives rather than the raw file.
+from linkedin_generation.social.campaign_config import CampaignConfig as _CC2
+import pathlib as _pl2
+_extreme = [q.angle for q in _CC2.from_yaml(
+    _pl2.Path('/opt/linkedin/config/linkedin_campaign.yaml')).pillars
+    if 'Extreme' in q.name][0]
+t.check('PILLAR: Extreme Applications no longer asks for "real performance numbers"',
+        'real performance numbers' not in _extreme)
+t.check('PILLAR: it asks for the mechanism instead',
+        'Start from the physics' in _yaml)
+
+
+# The false positives matter as much as the catches: TNT is openly a sales
+# channel, so blocking its ordinary product copy would be a worse failure than
+# the one this gate exists to prevent. "prov\\w*" originally matched PROVIDE and
+# flagged "We provide hybrid solutions for CNC spindles" on a live run.
+for _sentence, _should in [
+    ("We provide hybrid solutions for CNC spindles.", False),
+    ("We provide technical support.", False),
+    ("TNT Motion offers bearings engineered for harsh environments.", False),
+    ("Proven technology is widely used in CNC spindles.", False),
+    ("Water corrodes the inner race and the bearing seizes.", False),
+    ("We developed a unique cage.", True),
+    ("We used advanced polymer cages.", True),
+    ("We proved the design at -45 C.", True),
+    ("Our approach is proven in the field.", True),
+]:
+    _got = bool(unbacked_first_person_claims(_sentence, "", "TNT Motion"))
+    t.check(f'FEAT: {"flags" if _should else "allows"} - {_sentence[:46]}',
+            _got == _should)
+
 sys.exit(t.summary())
