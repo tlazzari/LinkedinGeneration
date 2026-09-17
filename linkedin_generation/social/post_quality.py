@@ -960,12 +960,33 @@ _MEASURED = re.compile(
 )
 
 
+# An absolute the post is REPORTING in order to knock down is not a claim the
+# post makes. "Many believe sealed bearings are maintenance-free" is the entire
+# premise of the Myth Busters pillar, and flagging it made that pillar
+# unpublishable - the gate was fighting the pillar's purpose.
+_REPORTED_BELIEF = re.compile(
+    r"\b(?:many|most|some|people|engineers?|buyers?|customers?)\s+"
+    r"(?:believe|think|assume|expect|are told|say)"
+    r"|\bthe myth\b|\bmyth:|\bit is (?:often )?(?:said|assumed|believed)"
+    r"|\bconventional wisdom\b|\bcommon(?:ly)? (?:belief|assumption|mistake)"
+    r"|\bsupposedly\b|\bin theory\b|\bthe claim is\b",
+    re.IGNORECASE,
+)
+
+
 def absolute_claims(text: str) -> List[str]:
-    """Absolutes asserted without a standard or a measurement behind them."""
+    """Absolutes the post ASSERTS, without a standard or measurement behind them.
+
+    An absolute quoted as someone else's belief is exempt: the post is setting it
+    up to be corrected, which is the opposite of claiming it.
+    """
     out: List[str] = []
     for sentence in split_sentences(text):
-        if _ABSOLUTE.search(sentence) and not _MEASURED.search(sentence):
-            out.append(sentence.strip()[:120])
+        if not _ABSOLUTE.search(sentence):
+            continue
+        if _MEASURED.search(sentence) or _REPORTED_BELIEF.search(sentence):
+            continue
+        out.append(sentence.strip()[:120])
     return out
 
 

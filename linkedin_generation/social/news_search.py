@@ -633,9 +633,27 @@ def publisher_name(url: str, given: str = "") -> str:
         cand = ".".join(parts[i:])
         if cand in _PUBLISHER_NAMES:
             return _PUBLISHER_NAMES[cand]
-    # Fall back to the registrable name, capitalised: autohome.com.cn -> Autohome
+    # A government portal is not a newspaper. segg.sh.gov.cn became "Segg", and a
+    # post then opened "Segg recently reported in the Chinese press" - naming a
+    # Shanghai municipal site as press, which is both wrong and exactly the
+    # attribution the state-source rule exists to prevent.
+    full = ".".join(parts)
+    # Check the LABELS, not a substring: "gov.cn" itself contains no ".gov".
+    if "gov" in parts:
+        if full.endswith(".cn"):
+            return "a Chinese government portal"
+        return "a government portal"
+    if "edu" in parts or "ac" in parts:
+        return "an academic source"
+
+    # Fall back to the registrable name, capitalised: autohome.com.cn -> Autohome.
+    # A very short fragment is meaningless on its own ("Segg"), so keep the
+    # domain intact rather than inventing a publication that does not exist.
     if parts:
-        return parts[0].replace("-", " ").title()
+        head = parts[0].replace("-", " ")
+        if len(head) < 5 and len(parts) > 1:
+            return full
+        return head.title()
     return given or "the press"
 
 def search_news_duckduckgo(query: str, num_results: int = 8,

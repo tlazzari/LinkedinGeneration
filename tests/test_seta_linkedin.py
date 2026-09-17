@@ -2255,4 +2255,22 @@ t.check('THEME: a pillar whose every query is tired still gets them all',
 t.check('THEME: the search accepts the recent themes',
         'recent_themes_used' in _i2.signature(_ns_mod.search_news_for_pillar).parameters)
 
+
+# A government portal is not the press, and a myth is not a claim.
+# 17 Sep: a post opened "Segg recently reported in the Chinese press" - segg.sh.gov.cn
+# is a Shanghai municipal site, so the post named a state source as press, which is
+# precisely the attribution the state-source rule exists to prevent.
+t.check('SOURCE: a Chinese government portal is named as one, not as press',
+        publisher_name('https://segg.sh.gov.cn/x') == 'a Chinese government portal')
+t.check('SOURCE: gov.cn itself is caught (no ".gov" substring in it)',
+        publisher_name('https://www.gov.cn/news') == 'a Chinese government portal')
+t.check('SOURCE: a foreign government portal too',
+        publisher_name('https://www.whitehouse.gov/a') == 'a government portal')
+t.check('SOURCE: universities are labelled, not invented into publications',
+        publisher_name('https://tsinghua.edu.cn/x') == 'an academic source')
+t.check('SOURCE: a real outlet is unaffected',
+        publisher_name('https://www.yicai.com/a') == 'Yicai (第一财经)')
+t.check('SOURCE: a four-letter fragment does not become a publication name',
+        publisher_name('https://segg.sh.gov.cn/x') != 'Segg')
+
 sys.exit(t.summary())

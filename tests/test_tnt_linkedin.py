@@ -515,4 +515,19 @@ for _sentence, _should in [
     t.check(f'FEAT: {"flags" if _should else "allows"} - {_sentence[:46]}',
             _got == _should)
 
+
+# An absolute the post REPORTS in order to knock down is not a claim it makes.
+# Flagging "Many believe sealed bearings are maintenance-free" made the whole
+# Myth Busters pillar unpublishable - the gate was fighting the pillar's purpose.
+for _s, _flag in [
+    ("Many believe sealed bearings are maintenance-free.", False),
+    ("Myth: grease colour indicates quality.", False),
+    ("Conventional wisdom says ceramic bearings never wear.", False),
+    ("This combination stops particle generation completely.", True),
+    ("Our bearings never fail.", True),
+    ("Particle release stays below ISO 14644 Class 5 limits.", False),
+]:
+    t.check(f'ABSOLUTE: {"flags" if _flag else "allows"} - {_s[:44]}',
+            bool(absolute_claims(_s)) == _flag)
+
 sys.exit(t.summary())
