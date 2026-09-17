@@ -544,4 +544,19 @@ for _allowed in [
     t.check(f'VOICE: admitted by decision - {_allowed[:44]}',
             not unbacked_first_person_claims(_allowed, "", "TNT Motion"))
 
+
+# Tom, 2026-09-17: "European-engineered bearing is fine". TNT Motion is an
+# Italian company that manufactures in North China, so the phrase describes where
+# the engineering is done rather than where the part is made - a positioning
+# decision, not a factual claim about origin, and his to make. Pinned because no
+# gate catches it today: if an origin or positioning check is ever added, this
+# must survive it.
+for _ok in [
+    "A TNT Motion European-engineered bearing costs more up front.",
+    "European-engineered, manufactured in North China.",
+]:
+    _found = (unbacked_first_person_claims(_ok, "", "TNT Motion")
+              + absolute_claims(_ok))
+    t.check(f'POSITIONING: allowed by decision - {_ok[:44]}', not _found)
+
 sys.exit(t.summary())
