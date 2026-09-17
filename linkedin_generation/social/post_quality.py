@@ -533,7 +533,9 @@ _STATISTIC = re.compile(
     r"|\b\d+(?:\.\d+)?[- ]fold\b"
     # physical quantities an engineer would check
     r"|\d[\d, ]*(?:\.\d+)?\s*(?:hours?|hrs?|h\b|years?|months?"
-    r"|°\s?[CF]|deg\s?[CF]|degrees?\s?[CF]?"
+    # A bare "280 C" carries the same claim as "280°C" and was invisible: the
+    # pattern wanted a degree symbol or the word "deg".
+    r"|°\s?[CF]\b|deg\s?[CF]?\b|degrees?\s?[CF]?\b|\s[CF]\b"
     r"|rpm|r/min|bar\b|psi\b|mpa\b|kn\b|nm\b"
     r"|microns?|µm|um\b|mm\b|kg\b|tonnes?|tons?"
     r"|db\b|watts?|kw\b|volts?)\b"

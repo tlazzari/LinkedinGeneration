@@ -126,7 +126,13 @@ class LinkedInPostGenerator(BaseContentGenerator):
         # vibration by 70%" and be judged sourced by the marketing copy that
         # invented it.
         sources = "\n".join(filter(None, ["\n".join(pillar.proof_points or []), news_context]))
-        verified = news_context or ""
+        # Catalogue specifications ARE evidence: ER runout grades, DIN69872,
+        # Si3N4 ball density are checkable facts about what TNT sells. Narrated
+        # engagements are not, whatever they claim. The pillar says which it has.
+        verified_parts = [news_context or ""]
+        if getattr(pillar, "proof_points_are_specs", False):
+            verified_parts.append("\n".join(pillar.proof_points or []))
+        verified = "\n".join(x for x in verified_parts if x)
         issues = post_issues(payload, TNT_VOICE, sources=sources, post_type=post_type,
                     verified=verified)
         if issues:

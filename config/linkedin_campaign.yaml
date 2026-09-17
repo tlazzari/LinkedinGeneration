@@ -51,28 +51,16 @@ content_pillars:
     about bearing selection and care based on outdated assumptions or vendor marketing.
 
     '
-  angle: 'Challenge common industry myths with hard data and surprising truths. Start posts with
-
-    hooks like "90% of engineers get this wrong..." or "The bearing myth that costs factories
-
-    millions every year..." Back every claim with specific numbers, research citations, or
-
-    real case data. Make readers feel like they are getting insider knowledge that gives
-
-    them an edge over competitors still following old rules.
-
-    '
+  # 2026-09-17: this angle asked for the invention it got. Rewritten to
+  # request the mechanism, never a narrative or a figure we cannot show.
+  angle: 'Take one widely held belief about bearings and test it against how the parts actually behave. State the belief plainly, then explain the physics that contradicts it - what the material, the lubricant or the load is really doing. Do NOT open with an invented statistic such as "90% of engineers get this wrong", do NOT cite research you cannot name, and quote no figure unless it is a published standard or the post shows the arithmetic. The correction should be interesting because it is true, not because it is dramatic.'
   proof_points:
-  - 'Myth: sealed bearings never need maintenance. Reality: 40% fail prematurely from heat buildup in high-duty cycles'
-  - The 3x grease-quantity rule that most engineers still follow (and why modern high-speed spindles need half that amount)
-  - 'Myth: the cheapest bearing always saves money. A textile mill proved otherwise when frequent replacements cost 7x the
-    price of a premium unit'
-  - 'Myth: ceramic hybrids are only for aerospace. Reality: they cut vibration by up to 60% in standard CNC spindles running
-    above 15 000 rpm'
-  - 'Myth: alignment within 0.05 mm is good enough. In compressor applications, cutting that to 0.01 mm doubled mean time
-    between failures'
-  - 'Myth: grease colour indicates quality. Two identically coloured greases from different suppliers gave wildly different
-    L10 life results'
+  - 'Myth: sealed bearings never need maintenance. Reality: grease ages faster as temperature rises, and a sealed unit cannot be re-greased when it does'
+  - 'Why the old grease-quantity rule of thumb over-fills a modern high-speed spindle, and what churning does to running temperature'
+  - 'Myth: the cheapest bearing saves money. Reality: replacement interval and downtime dominate the cost of a bearing, not its purchase price'
+  - 'Myth: ceramic hybrids are only for aerospace. Reality: lower ball density reduces centrifugal load at high rpm, which is an ordinary CNC spindle problem'
+  - 'Myth: alignment within a few hundredths is good enough. Reality: misalignment concentrates load on one edge of the raceway, and edge loading is what ends bearing life'
+  - 'Myth: grease colour indicates quality. Reality: colour is a dye choice - base oil viscosity, thickener type and additive package decide life'
   ctas:
   - Which bearing myth has cost you the most? Drop it in the comments
   - DM us your toughest bearing question - we will myth-bust it live
@@ -98,29 +86,16 @@ content_pillars:
     unexpected equipment failures and need to prevent recurrence.
 
     '
-  angle: 'Tell gripping detective stories about bearing failures. Open with the crisis moment:
-
-    "The call came at 3 AM - their main production line was down." Walk through the
-
-    investigation step by step. Include specific details: temperatures reached, vibration
-
-    readings, contamination levels found. End with the fix and the measurable outcome
-
-    (hours of downtime saved, euros recovered, repeat failures prevented).
-
-    '
+  # 2026-09-17: this angle asked for the invention it got. Rewritten to
+  # request the mechanism, never a narrative or a figure we cannot show.
+  angle: 'Explain one failure mode from the inside: the conditions that cause it, how it progresses, what it looks like at teardown, and what prevents it. Write it GENERICALLY - a mechanism that applies to anyone running that equipment. Do NOT invent a customer, a site, a call at 3 AM or an outcome, and attach no figure - temperature, clearance, downtime hours, euros - unless it comes from a published standard or the post shows how it was derived. Where a real limit matters, name the STANDARD.'
   proof_points:
-  - 'A food-processing plant lost 3 shifts of production when a sealed bearing seized in their main conveyor drive - root
-    cause: moisture ingress through a worn lip seal'
-  - A mining operator replaced the same crusher bearing every 4 months until we discovered abrasive slurry bypassing the housing
-    labyrinth
-  - Vibration analysis on a paper-mill dryer section flagged a developing inner-race spall 18 days before catastrophic failure
-  - A cement plant gearbox ran 15 degrees hotter than spec for weeks - the forensic teardown revealed micro-pitting from incorrect
-    viscosity grease
-  - An HVAC chiller compressor in a Dubai data centre tripped on overload - investigation traced the fault to axial thrust
-    from thermal expansion
-  - A wind-turbine gearbox showed white-etching cracks after only 30 months - metallurgical analysis pointed to hydrogen embrittlement
-    from a lubricant reaction
+  - 'Conveyor drives in washdown areas: how water passes a worn lip seal, what corrosion does to the raceway, and why the seizure arrives without warning'
+  - 'Crusher bearings in abrasive slurry: how contamination bypasses a labyrinth seal, and why the replacement interval keeps shortening'
+  - 'Vibration signatures of a developing inner-race spall: what the spectrum shows before failure, and how far ahead it can be read'
+  - 'Running hotter than spec: how incorrect grease viscosity leads to micro-pitting, and what the teardown reveals'
+  - 'Axial thrust from thermal expansion in compressor trains: why a bearing trips on overload when nothing else has changed'
+  - 'White-etching cracks in gearbox bearings: what hydrogen embrittlement from lubricant breakdown does to a raceway'
   ctas:
   - Got a mystery failure you never solved? Share it - let us investigate together
   - Tag a colleague who would appreciate this forensic breakdown
@@ -176,15 +151,12 @@ content_pillars:
 
     '
   proof_points:
-  - How we achieved 80 000+ hour life in a turbocompressor running at 280 C continuous discharge temperature
-  - A ceramic hybrid solution that cut vibration by 70% in high-speed CNC spindles operating above 20 000 rpm
-  - 'From the lab to an Arctic gas pipeline: the 18-month field trial that validated our cold-weather bearing design at -45
-    C'
-  - A subsea pump application demanded 5 years maintenance-free operation under 200 bar pressure - our engineers delivered
-    with a custom seal-and-bearing package
-  - Robotic arms in a Class-10 cleanroom required near-zero particle generation - special polymer cages and dry-film lubrication
-    made it possible
-  - A steel mill reheat furnace needed bearings surviving 350 C radiant heat with water-spray cooling cycles every 8 hours
+  - 'Turbocompressor bearings in continuous high-temperature service: why standard grease carbonises, and which cage materials survive'
+  - 'Ceramic hybrids in very high-speed spindles: lower ball density, less centrifugal load, and where the benefit stops'
+  - 'Cold-weather bearings in sub-zero service: grease stiffening, starting torque, and how clearance class is chosen'
+  - 'Subsea and high-pressure service: what deep-water pressure does to a seal, and the trade-off between sealing and friction'
+  - 'Cleanroom robotics: why standard grease sheds particles, and what polymer cages and dry-film lubricants change (ISO 14644 class terms)'
+  - 'Reheat furnace bearings under radiant heat and spray cooling: thermal cycling, clearance growth, and solid lubricants'
   ctas:
   - What is the most extreme environment your bearings operate in?
   - Designing something demanding? Let us engineer the bearing solution together
@@ -210,26 +182,16 @@ content_pillars:
     the products - building trust through transparency and human connection.
 
     '
-  angle: 'Take readers behind the scenes with first-person stories from TNT Motion engineers.
-
-    "Last week I visited a client in Germany..." or "After 15 years in this business,
-
-    here is what still surprises me..." Share the human side: the problem-solving process,
-
-    the unexpected discoveries, the satisfaction of a machine running smoothly. Include
-
-    specific technical details but wrap them in personal narrative.
-
-    '
+  # 2026-09-17: this angle asked for the invention it got. Rewritten to
+  # request the mechanism, never a narrative or a figure we cannot show.
+  angle: 'Write from the shop-floor perspective about how this work is actually done: what incoming inspection checks, why lubrication intervals differ by climate, what packaging prevents in transit. Speak as a company that does this every day. Do NOT invent a trip, a client, a colleague or a week such as "Last week I visited a client in Germany", and attach no figure that is not a published standard or shown arithmetic. The interest comes from the process being real, not from a story being told.'
   proof_points:
-  - What our quality lab learned from inspecting 500+ returned bearings last year - the failure patterns nobody talks about
-  - A client visit in Turkey that changed how we recommend lubrication intervals for tropical climates
-  - 'A day in our quality lab: the 12 tests every bearing passes before it earns the TNT Motion stamp'
-  - The Brazilian distributor who challenged us to cut delivery lead-time by half - and how our logistics team made it happen
-  - An engineer on site in Poland spotted micro-corrosion caused by condensation during container shipping - now we nitrogen-flush
-    every export pallet
-  - Our R&D team spent 6 months co-developing a custom cage geometry for a pump OEM - the result outperformed the original
-    spec by 40%
+  - 'The failure patterns that recur in returned bearings: contamination, misalignment, over-greasing, and what each one leaves behind'
+  - 'Why lubrication intervals shorten in hot, humid climates, and how a maintenance schedule should change for them'
+  - 'What incoming bearing inspection actually checks - dimensional, hardness, noise and clearance - and why each one matters'
+  - 'What really determines delivery lead time on a non-standard bearing, and which steps can be compressed'
+  - 'Condensation inside shipping containers: how micro-corrosion forms in transit, and what packaging prevents it'
+  - 'Custom cage geometry: when a standard cage limits an application, and what changes when geometry is matched to the load'
   ctas:
   - What would you want to see from inside our operations? Tell us in the comments
   - Questions for our engineering team? We read every message
@@ -245,6 +207,12 @@ content_pillars:
 
     '
 - name: 'Product Spotlight: Speciality & Non-Standard Solutions'
+  # These proof points are catalogue specifications and published standards - ER
+  # runout grades, DIN69872, ISO 7388/2B, Si3N4 ball density. They are checkable
+  # facts about what TNT sells, not stories about what TNT did, so a post MAY
+  # cite them and quote their figures. The four story pillars are the opposite
+  # and steer only; see the note on angle material in content_generation.
+  proof_points_are_specs: true
   # Evergreen by nature: a product explainer has no news hook by nature.
   # Search phrases kept so this can be flipped back deliberately.
   use_news_search: false
@@ -291,6 +259,12 @@ content_pillars:
     dramatic directional lighting that reveals metallic texture and engineering tolerances. No text,
     no logos, no labels anywhere in the image.
 - name: 'Workholding Precision: Collets, Pull Studs & Morse Tapers'
+  # These proof points are catalogue specifications and published standards - ER
+  # runout grades, DIN69872, ISO 7388/2B, Si3N4 ball density. They are checkable
+  # facts about what TNT sells, not stories about what TNT did, so a post MAY
+  # cite them and quote their figures. The four story pillars are the opposite
+  # and steer only; see the note on angle material in content_generation.
+  proof_points_are_specs: true
   use_news_search: true
   news_queries:
   - machine tool workholding industry

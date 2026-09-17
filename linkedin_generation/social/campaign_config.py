@@ -44,7 +44,9 @@ class PostPillar:
     video_prompt: str | None = None
     # RULE: if use_chart=True, seta_chart_generator.py generates the image (animated data GIF).
     use_chart: bool = False
-
+    # Whether this pillar's proof_points are checkable specifications (usable
+    # as evidence) rather than narrated engagements (which steer only).
+    proof_points_are_specs: bool = False
 
 @dataclass(frozen=True)
 class CampaignConfig:
@@ -102,6 +104,8 @@ class CampaignConfig:
                     target_client=entry.get("target_client", ""),
                     angle=entry.get("angle", ""),
                     proof_points=list(entry.get("proof_points", [])),
+                    proof_points_are_specs=bool(
+                        entry.get("proof_points_are_specs", False)),
                     ctas=list(entry.get("ctas", [])),
                     hashtags=list(entry.get("hashtags", [])),
                     image_prompt=entry.get("image_prompt"),
