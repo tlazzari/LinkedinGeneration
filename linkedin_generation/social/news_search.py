@@ -333,6 +333,32 @@ _REL_UNIT_DAYS = {
 }
 
 
+def _parse_absolute_date(text):
+    """Parse a real date string into an age in days, or None.
+
+    Grounded Gemini returns "September 17 2026" - a full month name and no comma -
+    which the old format list had no entry for, and a blind [:11] truncation cut it
+    to "September 1" so every format failed. Gemini's dates were discarded and
+    NEWS_MAX_AGE_DAYS could not be applied to the one provider that reports one.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    cleaned = re.sub(r"^(published|updated|on)\s+", "", raw, flags=re.I).strip()
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y", "%d/%m/%Y",
+                "%d %b %Y", "%b %d, %Y", "%b %d %Y",
+                "%d %B %Y", "%B %d, %Y", "%B %d %Y",
+                "%Y\u5e74%m\u6708%d\u65e5"):
+        for candidate in (cleaned, cleaned.split(",")[0], cleaned[:len(fmt) + 8]):
+            try:
+                d = datetime.strptime(candidate.strip(), fmt)
+            except ValueError:
+                continue
+            return max(0, (datetime.now() - d).days)
+    return None
+
+
 def parse_relative_age(text: str) -> Optional[int]:
     """Turn '4 天前' / '3 weeks ago' / '2026-09-09' into an age in days.
 
@@ -343,16 +369,19 @@ def parse_relative_age(text: str) -> Optional[int]:
     """
     if not text:
         return None
+    # ABSOLUTE dates are tried FIRST. The relative regex reads the year out of a
+    # Chinese date - "2026 nian 09 yue 03 ri" matches as "2026 years ago" =
+    # 2026*365 = 739,490 days - so every properly dated Chinese article was scored
+    # as two millennia old and dropped by NEWS_MAX_AGE_DAYS, in a pipeline whose
+    # whole strategy is Chinese-first news. (found 2026-09-18)
+    _abs = _parse_absolute_date(text)
+    if _abs is not None:
+        return _abs
     m = _REL_DATE_RE.search(text)
     if m:
         n = int(m.group(1))
         unit = m.group(2).lower()
         return n * _REL_UNIT_DAYS.get(unit, 1)
-    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d %b %Y", "%b %d, %Y"):
-        try:
-            return max(0, (datetime.now() - datetime.strptime(text.strip()[:11].strip(), fmt)).days)
-        except ValueError:
-            continue
     return None
 
 
@@ -772,6 +801,39 @@ def search_reference_marginalia(query: str, num_results: int = 5,
     logger.info("Marginalia returned %d reference results for %r",
                 len(out), query[:40])
     return out
+
+GEMINI_NEWS_CAP_PER_DAY = 60
+_GEMINI_USAGE_FILE = os.path.join(os.path.dirname(os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__)))), 'gemini_news_usage.json')
+
+
+def _gemini_usage():
+    import json as _j, time as _t
+    today = _t.strftime('%Y-%m-%d')
+    try:
+        d = _j.load(open(_GEMINI_USAGE_FILE))
+    except Exception:
+        d = {}
+    if d.get('day') != today:
+        d = {'day': today, 'used': 0}
+    return d
+
+
+def _gemini_calls_left() -> int:
+    """Grounded Gemini is cheap, not free: ~$0.0026 a call in tokens. A cap keeps a
+    retry loop from turning that into a bill, and makes the spend predictable."""
+    return max(0, GEMINI_NEWS_CAP_PER_DAY - int(_gemini_usage().get('used', 0)))
+
+
+def _gemini_spend() -> None:
+    import json as _j
+    d = _gemini_usage()
+    d['used'] = int(d.get('used', 0)) + 1
+    try:
+        _j.dump(d, open(_GEMINI_USAGE_FILE, 'w'))
+    except Exception:
+        pass
+
 
 def search_news_gemini(query: str, num_results: int = 5) -> List[dict]:
     """Search news using Gemini with Google Search grounding."""
@@ -1448,7 +1510,50 @@ def search_news_for_pillar(
             if len(all_results) >= num_articles * 2:
                 break
 
-    # 3. DuckDuckGo: free, keyless, and nothing to run out. Ahead of the other
+    # 3. Gemini with Google Search grounding. Promoted from last-resort on
+    #    2026-09-18 after the cost was actually measured rather than assumed.
+    #
+    #    The old comment said "every call spends tokens on the billed Gemini
+    #    key" and gated this behind `not all_results`. Both halves were wrong
+    #    in practice:
+    #      - GROUNDING is free to 1,500 grounded prompts/day on the paid tier
+    #        (ai.google.dev/gemini-api/docs/pricing), billed per PROMPT for 2.5
+    #        models, not per search query.
+    #      - Only the TOKENS are billed: gemini-2.5-flash is $0.30/1M in and
+    #        $2.50/1M out, so a news call (~420 in, ~1k out) costs about
+    #        $0.0026. A month of runs is roughly a dollar. SerpAPI's paid plan
+    #        is $75/month.
+    #    Meanwhile SerpAPI's free plan (250/month) has been at 0 left, so steps
+    #    1 and 2 return nothing and the pipeline was running on DuckDuckGo
+    #    alone - the least reliable provider carrying production posts.
+    #
+    #    It still runs only when the free providers came up short, and it is
+    #    capped per day so a loop cannot turn a quarter of a cent into a bill.
+    if len(all_results) < num_articles * 2:
+        budget = _gemini_calls_left()
+        if budget <= 0:
+            logger.warning("Gemini news budget for today is used up (%d calls); "
+                           "staying on the free providers", GEMINI_NEWS_CAP_PER_DAY)
+        else:
+            logger.info("Free providers returned %d article(s) - topping up with "
+                        "grounded Gemini (%d calls left today)",
+                        len(all_results), budget)
+            for query in (zh_queries + en_queries)[:2]:
+                if _gemini_calls_left() <= 0:
+                    break
+                _gemini_spend()
+                absorb(search_news_gemini(query, num_results=5))
+                if len(all_results) >= num_articles * 2:
+                    break
+
+    #    Why it now sits ABOVE DuckDuckGo rather than below it: DuckDuckGo
+    #    returns plenty of hits for a narrow industrial query, but they are
+    #    B2B wikis, document-sharing sites and vendor product pages, and every
+    #    one comes back with age_days=None - so NEWS_MAX_AGE_DAYS cannot be
+    #    applied to any of them. Gemini returns a named publisher and a date,
+    #    which is what the attribution and freshness rules actually require.
+
+    # 4. DuckDuckGo: free, keyless, and nothing to run out. Ahead of the other
     #    free options because it has no daily cap at all and returns the
     #    publisher URL directly, with no redirect to decode.
     if len(all_results) < num_articles * 2:
@@ -1458,7 +1563,7 @@ def search_news_for_pillar(
             if len(all_results) >= num_articles * 2:
                 break
 
-    # 4. Google Custom Search, once a key for it exists. Free but capped at 100
+    # 5. Google Custom Search, once a key for it exists. Free but capped at 100
     #    queries a day, so it goes after the uncapped one and before the billed
     #    one.
     if len(all_results) < num_articles * 2:
@@ -1467,20 +1572,6 @@ def search_news_for_pillar(
             if len(all_results) >= num_articles * 2:
                 break
 
-    # 5. Gemini with Google Search grounding - LAST RESORT (Tom, 2026-09-16).
-    #    It works well and searches Chinese properly, but every call spends
-    #    tokens on the billed Gemini key, and everything above is free. So it
-    #    runs only when the free providers between them could not find a single
-    #    usable article, and then on ONE query rather than three.
-    #
-    #    Note the condition: `not all_results`, not "fewer than we wanted". A
-    #    thin result from a free provider is still a result; paying to top it up
-    #    is how a last resort quietly becomes the default.
-    if not all_results:
-        logger.info("No free provider returned an article - falling back to "
-                    "grounded Gemini (billed)")
-        for query in (zh_queries + en_queries)[:1]:
-            absorb(search_news_gemini(query, num_results=5))
 
     # Theme rotation acts HERE, on results, not on queries. The first cut
     # reordered the pillar's queries - useless, because this pillar's queries

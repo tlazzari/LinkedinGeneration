@@ -2170,17 +2170,45 @@ t.check('ORDER: SerpAPI is tried before the free web providers',
         0 <= _srp_at < _ddg_at)
 t.check('ORDER: the uncapped free provider is tried before the capped one',
         0 <= _ddg_at < _cse_at)
-t.check('ORDER: the billed provider is tried LAST',
-        _gem_at > max(_srp_at, _ddg_at, _cse_at))
-t.check('ORDER: Gemini fires only when nothing else found ANY article',
-        'if not all_results:' in _body
-        and _body.index('if not all_results:') < _gem_at)
-t.check('ORDER: and on a single query, not three',
-        '[:1]' in _body[_body.index('if not all_results:'):_gem_at + 120])
+# 2026-09-18: the old rule here was "the billed provider is tried LAST", which was
+# built on a wrong premise. Measured against ai.google.dev/gemini-api/docs/pricing and
+# the live key: GROUNDING is free to 1,500 grounded prompts/day on the paid tier (billed
+# per prompt for 2.5 models, not per search query), and only the TOKENS are charged -
+# about $0.0026 a call. Meanwhile SerpAPI's free plan sat at 0 searches left, so the
+# pipeline was running on DuckDuckGo alone, which returns B2B wikis and vendor pages
+# with NO date at all, so NEWS_MAX_AGE_DAYS could not be applied to any of them.
+# Gemini is now tried before DuckDuckGo and bounded by a hard daily cap instead.
+t.check('ORDER: SerpAPI is still tried before Gemini (its results are free)',
+        0 <= _srp_at < _gem_at)
+t.check('ORDER: Gemini is tried before the undated free scrapers',
+        0 <= _gem_at < _ddg_at,
+        'DuckDuckGo results carry no date, so the freshness rule cannot run on them')
+t.check('ORDER: Gemini tops up rather than replacing the free providers',
+        'if len(all_results) < num_articles * 2:' in _body)
+t.check('COST: Gemini calls are capped per day',
+        _ns_mod.GEMINI_NEWS_CAP_PER_DAY > 0 and '_gemini_calls_left()' in _body
+        and '_gemini_spend()' in _body)
+t.check('COST: the cap is small enough to stay inside the free grounding allowance',
+        _ns_mod.GEMINI_NEWS_CAP_PER_DAY <= 100)
+t.check('COST: the daily counter resets, so the cap cannot lock news out for good',
+        _ns_mod._gemini_usage().get('day') is not None)
+t.check('ORDER: the cost decision is stated where it executes',
+        'free to 1,500 grounded prompts/day' in _body
+        or '1,500 grounded prompts/day' in _body)
 
-# Guard the whole decision, so a future reorder has to be deliberate.
-t.check('ORDER: the free-before-billed rule is stated where it executes',
-        'LAST RESORT' in _body or 'LAST RESORT' in (_ns_mod.search_news_for_pillar.__doc__ or ''))
+# A date must survive from every provider, or the freshness filter is blind.
+_pra = _ns_mod.parse_relative_age
+t.check('DATE: a Chinese absolute date is read as a date, not as "2026 years ago"',
+        _pra('2026\u5e7409\u670803\u65e5') is not None
+        and _pra('2026\u5e7409\u670803\u65e5') < 400,
+        'the relative regex matched the YEAR, scoring dated Chinese articles as '
+        '739,490 days old so every one was dropped by NEWS_MAX_AGE_DAYS')
+t.check("DATE: Gemini's 'September 17 2026' format parses",
+        _pra('September 17 2026') is not None and _pra('September 17 2026') < 400)
+t.check('DATE: relative forms still work',
+        _pra('3 weeks ago') == 21 and _pra('4 \u5929\u524d') == 4)
+t.check('DATE: junk is still None, not a fake age',
+        _pra('not a date') is None and _pra('') is None)
 
 
 # Credentials must never reach a log file. These APIs take the key as a query
