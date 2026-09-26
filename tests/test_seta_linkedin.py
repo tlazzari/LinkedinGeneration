@@ -2301,4 +2301,153 @@ t.check('SOURCE: a real outlet is unaffected',
 t.check('SOURCE: a four-letter fragment does not become a publication name',
         publisher_name('https://segg.sh.gov.cn/x') != 'Segg')
 
+
+# =====================================================================
+# THE MID-AUTUMN FESTIVAL POST THAT NEVER WENT OUT (2026-09-24)
+# =====================================================================
+# The greeting was generated on holiday-eve, exactly as designed, and then
+# REFUSED twice by the confidentiality gate:
+#
+#   CONFIDENTIALITY: names a person from the deal record: 'Global PMI Partners'
+#   CONFIDENTIALITY_BLOCKED: no post today
+#
+# It was a false positive. seta_kb_contact.display_name is built from EMAIL
+# DISPLAY NAMES, so organisations sit in the "people" table; the person matcher
+# dropped tokens of 3 characters or fewer (losing the distinctive "PMI") and
+# then asked only whether the survivors -- "global" and "partners" -- appeared
+# ANYWHERE in the text. For a Europe-China M&A firm those two words are
+# unavoidable, so the single regeneration hit it again and the festival passed
+# with no post. 25 Sep logged "no-slot": the greeting is scheduled on the eve
+# only, so a block loses it for the year.
+#
+# These are RULE ENFORCERS. Weakening any of them re-opens a silent failure:
+# either the gate blocks ordinary sentences, or it stops blocking real names.
+from datetime import date as _date, timedelta as _timedelta
+from linkedin_generation.social import confidentiality as _C
+
+_real_known = _C._known_names
+
+
+def _with_names(orgs, people, fn):
+    """Run fn() with the counterparty list replaced."""
+    _C._known_names = lambda: {"orgs": orgs, "people": people,
+                               "loaded": ["yes"] if (orgs and people) else []}
+    try:
+        return fn()
+    finally:
+        _C._known_names = _real_known
+
+
+# --- fix 3: person names must match CONTIGUOUSLY ---
+t.check('MOONCAKE: ordinary words from a company-shaped contact do NOT block',
+        _with_names(['Acme Widgets'], ['Global PMI Partners'],
+                    lambda: not _C.confidentiality_issues(
+                        'Our global outlook matters. The partners we back are patient.')))
+t.check('MOONCAKE: the same two words in one sentence do NOT block either',
+        _with_names(['Acme Widgets'], ['Global PMI Partners'],
+                    lambda: not _C.confidentiality_issues(
+                        'A global market still needs local partners.')))
+t.check('MOONCAKE: the ACTUAL name is still blocked',
+        _with_names(['Acme Widgets'], ['Global PMI Partners'],
+                    lambda: _C.confidentiality_issues(
+                        'We worked with Global PMI Partners on the mandate.')))
+t.check('MOONCAKE: a real two-part person name is still blocked',
+        _with_names(['Acme Widgets'], ['Giulia Ferraris'],
+                    lambda: _C.confidentiality_issues(
+                        'The seller was advised by Giulia Ferraris.')))
+t.check('MOONCAKE: that person name scattered across the text does NOT block',
+        _with_names(['Acme Widgets'], ['Giulia Ferraris'],
+                    lambda: not _C.confidentiality_issues(
+                        'Giulia joined in March. Ferraris is a separate matter.')))
+t.check('MOONCAKE: a plain holiday greeting is publishable',
+        _with_names(['Acme Widgets'], ['Global PMI Partners'],
+                    lambda: not _C.confidentiality_issues(
+                        'Wishing you and your family a happy Mid-Autumn Festival.')))
+
+# --- fix 2: an EMPTY list must FAIL CLOSED ---
+# An aborted build_contacts.py run left seta_kb_contact at 0 rows on 2026-09-26.
+# Only a load that THREW used to fail closed; a successful-but-empty one cleared
+# every post instead.
+t.check('MOONCAKE: an empty PEOPLE list refuses to clear anything',
+        _with_names(['Acme Widgets'], [],
+                    lambda: _C.confidentiality_issues('Any ordinary sentence.')))
+t.check('MOONCAKE: an empty ORG list refuses to clear anything',
+        _with_names([], ['Giulia Ferraris'],
+                    lambda: _C.confidentiality_issues('Any ordinary sentence.')))
+t.check('MOONCAKE: the refusal says the list could not be loaded',
+        _with_names([], [],
+                    lambda: any('could not be loaded' in i
+                                for i in _C.confidentiality_issues('Anything.'))))
+
+# --- fix 4: company-shaped display names are routed to the ORG gate ---
+t.check('MOONCAKE: a display name with a company word is a company',
+        all(_C._looks_like_company(n) for n in
+            ('Global PMI Partners', 'Rossi Capital', 'Meridian Advisors',
+             'Muster Industrie GmbH', 'Acme Holding S.r.l.')))
+t.check('MOONCAKE: an ordinary person name is NOT treated as a company',
+        not any(_C._looks_like_company(n) for n in
+                ('Giulia Ferraris', 'Marco Bianchi', 'Li Wei')))
+t.check('MOONCAKE: the live list routes company-shaped contacts into orgs',
+        not any(_C._looks_like_company(p) for p in _real_known()['people']))
+
+# --- fix 6: a blocked holiday greeting gets one more day ---
+from linkedin_generation.holiday.scheduler import HolidayAwareScheduler, HolidayEvent
+
+
+class _FakeCal:
+    def __init__(self, event):
+        self.event = event
+
+    def day_before_holiday(self, day):
+        return self.event if day == self.event.start_date - _timedelta(days=1) else None
+
+    def is_holiday(self, day):
+        return self.event if day == self.event.start_date else None
+
+
+def _sched(tmpdir, event, regular_days=frozenset()):
+    s = object.__new__(HolidayAwareScheduler)
+    s.calendars = {'china': _FakeCal(event)}
+    s.state_path = Path(tmpdir) / 'state.json'
+    s._regular_days = set(regular_days)
+    return s
+
+
+import tempfile as _tempfile
+_mid = HolidayEvent(name='Mid-Autumn Festival', start_date=_date(2026, 9, 25),
+                    end_date=_date(2026, 9, 25), locale='china')
+
+with _tempfile.TemporaryDirectory() as _td:
+    _s = _sched(_td, _mid)
+    t.check('MOONCAKE: the eve still schedules the greeting (unchanged)',
+            _s.evaluate_day(_date(2026, 9, 24)).should_post)
+    t.check('MOONCAKE: blocked on the eve -> the greeting runs on the day itself',
+            _s.evaluate_day(_date(2026, 9, 25)).should_post
+            and _s.evaluate_day(_date(2026, 9, 25)).reason == 'holiday')
+
+with _tempfile.TemporaryDirectory() as _td:
+    _s = _sched(_td, _mid)
+    (Path(_td) / '20260924_0600_holiday.json').write_text('{}')
+    t.check('MOONCAKE: if the eve post DID go out, the day itself does not repeat it',
+            not _s.evaluate_day(_date(2026, 9, 25)).should_post)
+
+with _tempfile.TemporaryDirectory() as _td:
+    _s = _sched(_td, _mid)
+    t.check('MOONCAKE: an ordinary non-holiday day is unaffected',
+            not _s.evaluate_day(_date(2026, 10, 14)).should_post)
+
+# --- fix 5: the KB rebuild must be atomic (cross-repo: /opt/scripts/seta_kb) ---
+# Not our repo, but the confidentiality gate reads the tables this script
+# writes, so its failure mode is ours. An interrupted DELETE-then-INSERT is what
+# emptied seta_kb_contact on 2026-09-26.
+_bc = Path('/opt/scripts/seta_kb/build_contacts.py')
+if _bc.is_file():
+    _bc_src = _bc.read_text()
+    t.check('MOONCAKE: the KB rebuild runs inside a transaction',
+            'sql_atomic' in _bc_src and 'START TRANSACTION' in _bc_src)
+    t.check('MOONCAKE: no bare DELETE is executed outside the transaction',
+            "sql('DELETE FROM seta_kb_contact" not in _bc_src)
+    t.check('MOONCAKE: the rebuild refuses to finish on an empty graph',
+            'EMPTY GRAPH' in _bc_src)
+
 sys.exit(t.summary())

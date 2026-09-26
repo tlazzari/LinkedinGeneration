@@ -57,6 +57,28 @@ _LEGAL_SUFFIX = (
 )
 
 
+# seta_kb_contact.display_name is built from EMAIL DISPLAY NAMES, so the "people"
+# table is full of organisations: "Global PMI Partners", "Cross Border", a mailing
+# list, a department. Routing those to the ORG bucket matters because the two
+# gates behave differently -- the org gate matches the whole string contiguously
+# and has the ordinary-word guards, while the person gate historically did not.
+_COMPANY_WORDS = {
+    "partners", "partner", "capital", "group", "holding", "holdings",
+    "advisors", "advisers", "advisory", "associates", "consulting",
+    "consultants", "ventures", "management", "industries", "international",
+    "solutions", "services", "technologies", "systems", "corporation",
+    "corp", "company", "studio", "bank", "banca", "sgr", "sim",
+}
+
+
+def _looks_like_company(name: str) -> bool:
+    """True when a contact display name is really an organisation."""
+    if re.search(r"(?i)(?<!\w)(?:" + _LEGAL_SUFFIX + r")(?!\w)", name or ""):
+        return True
+    tokens = [t for t in re.split(r"[\s.,&-]+", (name or "").lower()) if t]
+    return any(t in _COMPANY_WORDS for t in tokens)
+
+
 # The knowledge base was built from email headers, so its org table contains
 # mail infrastructure and ordinary nouns alongside real counterparties: "Gmail",
 # "Email", "News", "Staff", "Welcome", "It", "London" - and "Business", which on
@@ -177,13 +199,33 @@ def _known_names() -> Dict[str, List[str]]:
             )
             for line in out.stdout.splitlines():
                 name = line.strip()
-                if name and name.upper() != "NULL" and name.lower() not in sectors:
+                if not name or name.upper() == "NULL" or name.lower() in sectors:
+                    continue
+                # A company-shaped display name goes to the ORG gate whatever
+                # table it came from -- see _looks_like_company.
+                if bucket is people and _looks_like_company(name):
+                    orgs.append(name)
+                else:
                     bucket.append(name)
     except Exception as exc:
         # Fail CLOSED: with no list we cannot clear anything, so the caller must
         # treat that as "block", never as "nothing found".
         logger.error("Could not load the counterparty list: %s", exc)
         return {"orgs": [], "people": [], "loaded": []}
+
+    # An EMPTY list is not "nothing confidential exists" -- it is a broken load,
+    # and reading it as all-clear is the opposite of this module's design.
+    # 2026-09-26: an aborted build_contacts.py run left seta_kb_contact at 0 rows
+    # (it DELETEs both tables before repopulating, outside any transaction), so
+    # the person gate silently tested an empty list and cleared everything.
+    # Only a load that THREW used to fail closed; a successful-but-empty one did
+    # not. Both must.
+    if not orgs or not people:
+        logger.error(
+            "counterparty list loaded EMPTY (orgs=%d people=%d) - refusing to "
+            "clear anything until the knowledge base is rebuilt",
+            len(orgs), len(people))
+        return {"orgs": orgs, "people": people, "loaded": []}
     return {"orgs": orgs, "people": people, "loaded": ["yes"]}
 
 
@@ -250,8 +292,17 @@ def confidentiality_issues(text: str, public_context: str = "") -> List[str]:
         parts = [p for p in person.split() if len(p) > 3]
         if len(parts) < 2:
             continue          # a single common first name would fire constantly
-        if all(re.search(r"(?<!\w)" + re.escape(p) + r"(?!\w)", text, re.IGNORECASE)
-               for p in parts):
+        # CONTIGUOUS, like the org gate above. The old test asked only whether
+        # every token longer than 3 chars appeared SOMEWHERE in the text, which
+        # blocked the 2026-09-24 Mid-Autumn post: the contact list held
+        # "Global PMI Partners", the distinctive token "PMI" was dropped for
+        # being 3 characters, and the survivors -- "global" and "partners" --
+        # are unavoidable words in a Europe-China M&A post. They matched two
+        # sentences apart, in unrelated senses, and the festival passed with no
+        # greeting. Requiring the actual name still catches a real person.
+        pattern = r"(?<!\w)" + r"\s+".join(
+            re.escape(p) for p in person.split()) + r"(?!\w)"
+        if re.search(pattern, text, re.IGNORECASE):
             issues.append(f"names a person from the deal record: '{person}'")
 
     for pattern in CONFIDENTIAL_CLAIMS:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -56,6 +56,27 @@ class HolidayAwareScheduler:
             )
             return HolidayDecision(should_post=True, reason="holiday", holiday=holiday)
 
+        # The greeting is scheduled on the EVE, so anything that stops it that
+        # morning loses the festival for the year. On 2026-09-24 the Mid-Autumn
+        # post was refused by the confidentiality gate (a false positive on
+        # "Global PMI Partners"), and 25 Sep -- the festival itself -- logged
+        # "no-slot". Nothing went out.
+        #
+        # This is NOT a retry of the blocked draft, and it does not weaken the
+        # gate: it generates a FRESH post that must clear every gate on its own.
+        # A second refusal still means no post. The rule that a blocked draft
+        # must never be "retried into existence" is about forcing one draft
+        # past the gate within a run, which this does not do.
+        today_holiday = self._holiday_today(day)
+        if today_holiday and not self._published_on(day - timedelta(days=1)):
+            logger.info(
+                "Holiday %s starts today and nothing was published on the eve "
+                "(%s); generating the greeting today instead",
+                today_holiday.name, day - timedelta(days=1),
+            )
+            return HolidayDecision(should_post=True, reason="holiday",
+                                   holiday=today_holiday)
+
         if not self._is_regular_post_day(day):
             logger.info("No scheduled post for %s", day)
             return HolidayDecision(should_post=False, reason="no-slot")
@@ -84,6 +105,28 @@ class HolidayAwareScheduler:
             "pillar": pillar,
             "decision": decision,
         }
+
+    def _holiday_today(self, day: date) -> Optional[HolidayEvent]:
+        """The holiday STARTING today, if any (not one already under way)."""
+        for calendar in self.calendars.values():
+            event = calendar.is_holiday(day)
+            if event and event.start_date == day:
+                return event
+        return None
+
+    def _published_on(self, day: date) -> bool:
+        """Did a post actually go out on `day`?
+
+        Read from the artifact files rather than a state flag: artifacts are
+        written when a post is published, so they are the record of what
+        happened. A blocked run writes nothing, which is exactly the signal.
+        """
+        try:
+            stamp = day.strftime("%Y%m%d")
+            return any(p.name.startswith(stamp)
+                       for p in self.state_path.parent.glob(f"{stamp}*.json"))
+        except Exception:      # never let a bookkeeping read stop a post
+            return False
 
     def _holiday_tomorrow(self, day: date) -> Optional[HolidayEvent]:
         for calendar in self.calendars.values():
