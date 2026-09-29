@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import json
 import logging
 from dataclasses import dataclass, field
@@ -153,7 +155,8 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
 
         # A prompt is a request, not a guarantee: check what came back and give
         # the model one corrective pass before falling back to mechanical fixes.
-        issues = post_issues(payload, SETA_VOICE, sources=sources, post_type=post_type)
+        issues = post_issues(payload, SETA_VOICE, sources=sources, post_type=post_type) \
+            + experience_issues(payload, pillar, holiday)
         if issues:
             logger.warning(
                 "Seta post failed the quality gate (%s) - regenerating once",
@@ -176,7 +179,8 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             retry_payload = self._strip_urls(
                 self._parse_response(retry_raw), news_articles, post_type
             )
-            if len(post_issues(retry_payload, SETA_VOICE, sources=sources, post_type=post_type)) < len(issues):
+            if len(post_issues(retry_payload, SETA_VOICE, sources=sources, post_type=post_type)
+                   + experience_issues(retry_payload, pillar, holiday)) < len(issues):
                 payload = retry_payload
 
         payload = apply_fixes(payload, SETA_VOICE)
@@ -236,6 +240,9 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                 raise ConfidentialityBlocked("; ".join(still))
             payload = safe_payload
 
+        # The decade of experience is part of what this pillar IS (user 2026-09-29): if the
+        # model still left it out, say it in code rather than publish without it.
+        payload = ensure_experience_mention(payload, pillar, holiday)
         remaining = post_issues(payload, SETA_VOICE, sources=sources, post_type=post_type)
         # A story already told is not a new post. The URL exclusion above stops
         # the common case (the same article still ranking top a week later);
@@ -603,7 +610,11 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             "- BODY FORMATTING: 3-4 SHORT paragraphs separated by a blank line, each at most 3 sentences "
             "and under 60 words. Never one long block - LinkedIn hides everything after the first two "
             "lines behind 'see more', so the opening sentence must stand alone as a hook.\n"
-            "- cta = EXACTLY ONE short paragraph that ENDS WITH A GENUINE OPEN QUESTION to the reader - "
+            + ("- cta MUST open by saying that Seta Capital has observed this pattern over MORE THAN A "
+               "DECADE of Europe-China mandates - in your own words each time (e.g. 'Across more than a "
+               "decade of Europe-China mandates, Seta Capital has seen...'). Never give a number of deals.\n"
+               if getattr(pillar, "require_experience_mention", False) and not holiday else "")
+            + "- cta = EXACTLY ONE short paragraph that ENDS WITH A GENUINE OPEN QUESTION to the reader - "
             "a real question a practitioner would want to answer from experience, specific to this post's "
             "subject. Never a rhetorical or yes/no question, and never the same question twice.\n"
             "Constraints:\n"
@@ -646,3 +657,54 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
 
 
 __all__ = ["SetaLinkedInPostGenerator", "GeneratedPost"]
+
+
+# ── "MORE THAN A DECADE" (user 2026-09-29) ─────────────────────────────────────────────
+# Tom: "you never mention that these trends are being observed by the more than a decade long
+# experience of Seta Capital ... this should be mentioned always in this pillar". The prompt asked
+# for the experience and the model put a stray "we have observed" in the body instead. So: a check
+# (one retry) and, failing that, the sentence is added in code. The TIME SPAN is the good number;
+# a count of deals never is (see "NEVER COUNT SETA'S OWN MANDATES").
+_EXPERIENCE_RE = re.compile(
+    r"\b(?:more than|over|across|after|nearly) (?:a|one) decade\b|\bdecade[- ]long\b"
+    r"|\b(?:over |more than |across )?(?:twelve|12) years\b|\bsince 2014\b",
+    re.IGNORECASE,
+)
+_EXPERIENCE_FALLBACK_BRAND = (
+    "Seta Capital has seen this pattern across more than a decade of Europe-China mandates.",
+    "It is a pattern Seta Capital has watched develop over more than a decade of cross-border mandates.",
+    "More than a decade of Europe-China mandates has shown Seta Capital how this plays out.",
+)
+_EXPERIENCE_FALLBACK_PLAIN = (
+    "It is a pattern seen across more than a decade of Europe-China mandates.",
+    "More than a decade of cross-border mandates shows the same pattern.",
+    "The same pattern has held across more than a decade of Europe-China mandates.",
+)
+
+
+def experience_issues(payload, pillar, holiday=None):
+    """The closing paragraph must carry the decade of experience on pillars that require it."""
+    if holiday or not getattr(pillar, "require_experience_mention", False):
+        return []
+    if _EXPERIENCE_RE.search(str(payload.get("cta") or "")):
+        return []
+    return ["closing paragraph does not say that Seta Capital has observed this over more than a "
+            "decade of Europe-China mandates - say it there, in one clause of your own words, "
+            "without any number of deals"]
+
+
+def ensure_experience_mention(payload, pillar, holiday=None, when=None):
+    """Add the experience sentence to the cta when the model left it out."""
+    if not experience_issues(payload, pillar, holiday):
+        return payload
+    from datetime import date as _date
+    cta = str(payload.get("cta") or "").strip()
+    pool = _EXPERIENCE_FALLBACK_PLAIN if re.search(r"Seta Capital", cta) else _EXPERIENCE_FALLBACK_BRAND
+    sentence = pool[(when or _date.today()).toordinal() % len(pool)]
+    # before the closing question, so the post still ends on it
+    m = re.search(r"[^.!?]*\?\s*$", cta)
+    cta = (cta[:m.start()].rstrip() + " " + sentence + " " + m.group(0).strip()).strip() if m \
+        else (cta + " " + sentence).strip()
+    out = dict(payload); out["cta"] = cta
+    logger.warning("EXPERIENCE: closing paragraph lacked the decade of experience - added in code")
+    return out

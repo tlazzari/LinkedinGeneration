@@ -91,6 +91,8 @@ content_pillars:
     '
 
 - name: Thought Leadership
+  # Always say the firm has seen this over more than a decade (user 2026-09-29).
+  require_experience_mention: true
   # EXPERIENCE-LED, not news-led (2026-09-13). This pillar is supposed to be
   # Seta's own view built on its own mandates; with news on, the model anchored
   # every post on someone else's article and the firm's record became a closing

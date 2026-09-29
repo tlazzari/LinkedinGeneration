@@ -2450,4 +2450,22 @@ if _bc.is_file():
     t.check('MOONCAKE: the rebuild refuses to finish on an empty graph',
             'EMPTY GRAPH' in _bc_src)
 
+# === 2026-09-29: Thought Leadership always names the decade of experience ===
+import yaml as _y2
+_sy = _y2.safe_load(open(PROJECT_ROOT / 'config' / 'seta_capital_linkedin.yaml', encoding='utf-8'))
+_tl = next((p for p in _sy['content_pillars'] if p['name'].startswith('Thought Leadership')), {})
+t.check('RULE: Seta Thought Leadership requires the decade of experience', _tl.get('require_experience_mention') is True)
+from linkedin_generation.social.seta_content_generation import experience_issues as _ei, ensure_experience_mention as _em
+class _P: require_experience_mention = True
+class _Q: require_experience_mention = False
+_bad = {'cta': 'Seta Capital observes these trends closely. What would you ask a founder first?'}
+t.check('EXPERIENCE: a cta without the decade is flagged', bool(_ei(_bad, _P())))
+t.check('EXPERIENCE: "more than a decade" passes', not _ei({'cta': 'Across more than a decade of Europe-China mandates, Seta Capital has seen this. Why?'}, _P()))
+t.check('EXPERIENCE: other pillars and tenants are not affected', not _ei(_bad, _Q()))
+_fixed = _em(_bad, _P())
+t.check('EXPERIENCE: the fallback adds it', not _ei(_fixed, _P()), _fixed['cta'])
+t.check('EXPERIENCE: the fallback keeps the question last', _fixed['cta'].rstrip().endswith('?'), _fixed['cta'])
+t.check('EXPERIENCE: the fallback does not name Seta twice', _fixed['cta'].count('Seta Capital') == 1, _fixed['cta'])
+t.check('EXPERIENCE: holiday posts are exempt', not _ei(_bad, _P(), holiday=object()))
+
 sys.exit(t.summary())
