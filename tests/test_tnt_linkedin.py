@@ -583,10 +583,14 @@ t.check('RULE: Product Spotlight offers no rivet nut (拉钉 is a PULL STUD; TNT
 t.check('RULE: no pillar cites DIN 7337 (the blind-rivet standard)',
         '7337' not in str(_cy))   # the loaded config, not the audit comments
 t.check('RULE: Product Spotlight pillar tags fit every product it rotates through',
-        not ({'#HybridBearings', '#TurbineBearings', '#HighTempEngineering'} & set(_spot.get('hashtags', []))))
+        not ({'#HybridBearings', '#TurbineBearings', '#HighTempEngineering', '#CNCMachining', '#Bearings'}
+             & set(_spot.get('hashtags', []))))
 # user 2026-09-29: spotlight only what is in the CNC Tooling Catalogue
 t.check('RULE: Product Spotlight exists and is catalogue-only', bool(_spot) and 'catalogue' in _spot.get('name', '').lower())
-for _bad in ('hybrid', 'turbine', 'high temperature', 'preload', 'ceramic'):
+for _fam in ('deep groove', 'tapered roller', 'spherical roller', 'cylindrical roller', 'toolholder', 'er collet'):
+    t.check(f'RULE: Product Spotlight covers both catalogues - "{_fam}"', _fam in _spot_txt)
+# turbines ARE a legitimate application (their rolling bearings), preload a catalogue topic (user 2026-09-29)
+for _bad in ('rivet', 'high temperature bearing'):   # hybrid kept by the user 2026-09-29
     t.check(f'RULE: Product Spotlight does not advertise non-catalogue "{_bad}"', _bad not in _spot_txt)
 import re as _re
 _all_pp = ' '.join(pp for p in _ps.values() if p.get('proof_points_are_specs') for pp in p.get('proof_points', []))

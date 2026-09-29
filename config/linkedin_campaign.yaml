@@ -206,13 +206,17 @@ content_pillars:
     conveying expertise and craftsmanship.
 
     '
-- name: 'Product Spotlight: CNC Tooling Catalogue'
-  # CATALOGUE ONLY (user 2026-09-29): "i would restrict the spotlight to the products in the
-  # catalogue". Every proof point below is quoted from the CNC Tooling Catalogue v2.3
-  # (static/catalogues/build/strings_en.py, TNTMotion repo) - what TNT publishes as its own
-  # range, so a post MAY cite these figures. Removed: rivet nuts (never sold; 拉钉 is a pull
-  # stud), hybrid / preloaded / high-temperature bearings (not in the catalogue) and turbine
-  # bearings (turbine main bearings are hydrostatic / hydrodynamic, not rolling bearings).
+- name: 'Product Spotlight: TNT Motion Catalogues'
+  # CATALOGUES ONLY (user 2026-09-29): the spotlight shows what is in TNT's two published
+  # catalogues - the CNC Tooling Catalogue (current build, static/catalogues/build/strings_en.py,
+  # TNTMotion repo) and the bearings General Catalogue v1.4.2 (static/catalogues/
+  # TNT-Motion-General-Catalogue-v1.4.2.pdf). Every proof point is quoted from one of them, so a
+  # post MAY cite these figures. Removed: rivet nuts (never sold; 拉钉 is a pull stud) and high-
+  # temperature bearing products. HYBRID BEARINGS stay (user 2026-09-29: "we can keep", to be added
+  # to the catalogue in a later session) - quoted with material properties only, no performance figure. Turbines: their main
+  # shafts often run on hydrostatic / hydrodynamic bearings, but a turbine holds many ROLLING
+  # bearings too (gearboxes, rotors, auxiliaries) - those TNT supplies; the catalogue lists wind-
+  # turbine uses for tapered, spherical and cylindrical roller bearings.
   # A runout figure is only half a spec without where it is measured: always "at 4×D",
   # "at 3× diameter" or "at gauge length", exactly as the catalogue states it.
   proof_points_are_specs: true
@@ -222,12 +226,14 @@ content_pillars:
   - CNC toolholding industry
   - machine tool accessories market
   target_client: >
-    CNC machining centre operators, toolroom managers, production engineers and distributors who
-    specify toolholders, collets and tapping tools for milling and turning centres.
+    CNC machining centre operators, toolroom managers, maintenance and design engineers, OEM
+    procurement teams and distributors who specify toolholding and bearings.
   angle: >
-    Showcase one product family from the TNT Motion CNC Tooling Catalogue per post, rotating across:
-    CNC toolholders (BT, CAT, HSK, ISO), hydraulic chucks, shrink-fit holders, ER collets, EOC
-    collets, tapping collets, ER clamping nuts, and collet chuck adapters. Name the product family in
+    Showcase one product family from TNT Motion's two catalogues per post, rotating across the CNC
+    Tooling Catalogue (CNC toolholders BT/CAT/HSK/ISO, hydraulic chucks, shrink-fit holders, ER collets,
+    EOC collets, tapping collets, ER clamping nuts, collet chuck adapters) and the bearings General
+    Catalogue (deep groove ball, tapered roller, spherical roller, cylindrical roller, Y-bearings,
+    needle roller bearings, precision classes, noise and vibration grades), plus hybrid bearings. Name the product family in
     the headline, state one clear specification taken from the proof points below, then explain the
     mechanism: why an engineer chooses it over the alternative. Quote only the figures written in the
     proof points, and every runout figure together with where it is measured (for example
@@ -253,28 +259,61 @@ content_pillars:
     nut for high-speed spindles; torque wrenches for repeatable clamping'
   - 'Collet chuck adapters, straight shank and Morse taper, ER16 to ER40: ER clamping on drill presses,
     conventional mills and lathes without a CNC toolholder'
+  # --- bearings General Catalogue v1.4.2 ---
+  - 'Deep groove ball bearings: bore 1 mm to 145 mm, outer diameter 3 mm to 240 mm; radial and axial
+    loads in both directions; cages in steel, brass or plastic; open, shielded or sealed; used in electric
+    motors and generators, wheel hubs, transmissions and alternators'
+  - 'Tapered roller bearings: combined radial load and axial load in one direction, with clearance and
+    preload set at assembly; used in vehicle axles, gearboxes and differentials, railcar axles, and wind
+    turbine gearboxes and rotors'
+  - 'Spherical roller bearings: self-aligning - they accommodate angular misalignment and shaft
+    deflection while carrying heavy radial loads and axial loads in both directions; conical-bore versions
+    mount with adapter or withdrawal sleeves; used in mining crushers and screens, paper-mill rolls and
+    wind turbines'
+  - 'Cylindrical roller bearings NU, NUP and NJ: high radial load capacity from the large roller-raceway
+    contact; NUP and NJ also locate the shaft axially; multi-row types support the radial loads in wind
+    turbine gearboxes'
+  - 'Y-bearings YAR (set screw), YEL (eccentric collar) and YAT (grub screw): convex outer ring in a
+    concave housing makes them self-aligning; pre-lubricated and sealed for low maintenance'
+  - 'Hybrid bearings: silicon nitride (Si3N4) ceramic balls on steel races - silicon nitride weighs
+    3.2 g/cm³ against 7.8 g/cm³ for bearing steel (about 60% lighter) and does not conduct electricity,
+    which stops current passing through the bearing in e-motors and inverter-driven motors'
+  - 'Needle roller bearings: high load capacity in a small radial cross-section, from the large contact
+    area of the needles on the raceway'
+  - 'Bearing precision classes to ISO 492 (bore 0 to 18 mm), radial runout of the ring: P0 ≤ 15 µm,
+    P6 ≤ 10 µm, P5 ≤ 7 µm, P4 ≤ 4 µm, P2 ≤ 2 µm'
+  - 'Noise and vibration grades: Z1 to Z3 for noise and V1 to V3 for vibration; Z3V3 is the
+    high-precision grade, for quiet electric motors and precision equipment'
   ctas:
-  - Request the TNT Motion CNC Tooling Catalogue — DM or email info@tntbearings.com
+  - Request our CNC Tooling Catalogue or our bearings General Catalogue — DM or email info@tntbearings.com
   - Tell us your spindle taper and the tools you run, and we will match the holder
   - Tag a toolroom engineer who specifies their own toolholding
   # Pillar tags go on EVERY post of the pillar; product tags only when the post names it.
   hashtags:
-  - '#CNCMachining'
   - '#PrecisionComponents'
   product_hashtags:
-    toolholder: ['#Toolholders', '#Toolholding']
-    hydraulic: ['#HydraulicChuck', '#Toolholding']
-    shrink: ['#ShrinkFit', '#Toolholding']
-    er collet: ['#Collets', '#ERCollets']
-    eoc: ['#Collets']
-    tapping: ['#Tapping', '#Threading']
+    toolholder: ['#Toolholders', '#Toolholding', '#CNCMachining']
+    hydraulic: ['#HydraulicChuck', '#Toolholding', '#CNCMachining']
+    shrink: ['#ShrinkFit', '#Toolholding', '#CNCMachining']
+    er collet: ['#Collets', '#ERCollets', '#CNCMachining']
+    eoc: ['#Collets', '#CNCMachining']
+    tapping: ['#Tapping', '#Threading', '#CNCMachining']
     nut: ['#ERCollets', '#Workholding']
     adapter: ['#Collets', '#Workholding']
+    deep groove: ['#BallBearings', '#Bearings']
+    tapered roller: ['#RollerBearings', '#Bearings']
+    spherical roller: ['#RollerBearings', '#Bearings']
+    cylindrical roller: ['#RollerBearings', '#Bearings']
+    y-bearing: ['#Bearings', '#PowerTransmission']
+    needle: ['#NeedleBearings', '#Bearings']
+    turbine: ['#WindEnergy']
+    z3v3: ['#Bearings', '#ElectricMotors']
+    hybrid: ['#HybridBearings', '#ElectricMotors']
   image_prompt: >
-    Clean industrial macro photography of CNC tooling on a machined steel surface — a toolholder with
-    its taper and flange, an ER collet, a hydraulic chuck or a tapping collet — under dramatic
-    directional lighting that reveals the ground surfaces and engineering tolerances. No bearings.
-    No text, no logos, no labels anywhere in the image.
+    Clean industrial macro photography of the one product the post is about, on a machined steel
+    surface — a toolholder, collet, hydraulic chuck or tapping collet, or a ball, tapered, spherical,
+    cylindrical, Y or needle roller bearing — under dramatic directional lighting that reveals the
+    ground surfaces. No text, no logos, no labels anywhere in the image.
 - name: 'Workholding Precision: Collets, Pull Studs & Morse Tapers'
   # These proof points are catalogue specifications and published standards - ER
   # runout grades, DIN69872, ISO 7388/2B, Si3N4 ball density. They are checkable
@@ -304,7 +343,7 @@ content_pillars:
   # AUDITED 2026-09-29: removed unsourced figures (±0.003 HP, 12,000 rpm, "up to 30%", 2 mm,
   # 40–60°C, 2–3x) and the invented "we see this every month in returns".
   - 'ER collet series (ER8–ER50, DIN 6499 / ISO 15488): runout ≤ 0.008 mm standard grade and ≤ 0.005 mm
-    HP grade, both measured at 4×D (CNC Tooling Catalogue v2.3) — the difference that separates finishing
+    HP grade, both measured at 4×D (CNC Tooling Catalogue) — the difference that separates finishing
     passes from rework'
   - 'Pull studs (拉钉) — DIN 69872, ISO 7388/2B, MAS 403 BT, JIS B 6339: the one component most
     machinists never inspect. A worn or mismatched stud weakens the drawbar grip on the holder, causing
