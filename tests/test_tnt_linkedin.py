@@ -624,6 +624,27 @@ _pp = _PP(name='x', target_client='', angle='', proof_points=[], ctas=[], hashta
 _tags = _Stub()._merge_hashtags([], _pp, text='ER collet runout matters')
 t.check('HASHTAGS: a collet post gets #Collets', '#Collets' in _tags)
 t.check('HASHTAGS: a collet post does not get #TurbineBearings', '#TurbineBearings' not in _tags)
+# 2026-09-29: at most 4 tags, brand tag always kept, trade tags not slogans, questions people answer
+_cap_stub = _Stub(); _cap_stub.campaign.max_hashtags = 4; _cap_stub.campaign.default_hashtags = ['#TNTMotion', '#Manufacturing']
+_many = _cap_stub._merge_hashtags(['#A', '#B', '#C', '#D', '#E'], _pp, text='ER collet runout')
+t.check('HASHTAGS: capped at 4', len(_many) == 4, str(_many))
+t.check('HASHTAGS: the brand tag survives the cap', _many[0] == '#TNTMotion', str(_many))
+t.check('HASHTAGS: curated product tags outrank the model picks', '#Collets' in _many, str(_many))
+t.check('HASHTAGS: TNT campaign caps at 4', _cy['defaults'].get('max_hashtags') == 4)
+_all_tags = set(_cy['defaults']['hashtags']) | {x for p in _cy['content_pillars'] for x in p.get('hashtags', [])} \
+            | {x for p in _cy['content_pillars'] for v in (p.get('product_hashtags') or {}).values() for x in v}
+for _slogan in ('#BearingExperts', '#EngineeringSupport', '#PrecisionComponents', '#BearingMyths', '#MaintenanceTruth',
+                '#EngineeringLife', '#BehindTheScenes', '#ToolholderPrecision'):
+    t.check(f'HASHTAGS: no brand-slogan tag "{_slogan}"', _slogan not in _all_tags)
+from social.post_quality import generic_closing_question as _gq
+for _bad in ('What blind fastening challenge are you solving right now?', 'Do you use HP collets?',
+             'What challenges are you facing with bearings?', 'Thoughts?',
+             'What is your biggest challenge with vibration monitoring today?'):
+    t.check(f'QUESTION: generic/yes-no caught - {_bad[:40]}', bool(_gq(_bad)))
+for _good in ('What runout do you measure on your HP collets at 4×D?',
+              'Which grease have you seen fail first in a washdown line, and after how long?',
+              'Need a quote? Tell us which spindle taper you run - which holder gives you the most trouble?'):
+    t.check(f'QUESTION: a real question passes - {_good[:40]}', not _gq(_good))
 t.check('HASHTAGS: Bolla tenant pillars carry product_hashtags too', 'product_hashtags' in (PKG_DIR / 'social' / 'brand_store.py').read_text())
 
 

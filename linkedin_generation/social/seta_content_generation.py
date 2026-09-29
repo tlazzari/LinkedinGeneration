@@ -629,7 +629,7 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             "make it qualitatively; readers here are M&A professionals who will check.\n"
             "- WRITE CONCRETELY. Banned as padding: strategic, complex, dynamic, landscape, evolving, robust, leverage, nuanced, intricate, crucial, comprehensive, seamless, cutting-edge, unparalleled, paramount, holistic, value-add. Across this page's archive every post averaged 5 such words per 100 - which is why they all read the same. Name the country, the sector, the component, the situation. A sentence that would still be true for a different company in a different industry is padding: cut it.\n"
             "- NEVER include political commentary or negative remarks about any country.\n"
-            "- Finish with 3-5 hashtags from this pool: "
+            "- Finish with 2-3 hashtags from this pool (the post carries at most 4 in total): "
             f"{hashtag_pool}.\n"
             f"{image_requirements}\n"
             "- Provide alt_text suitable for LinkedIn accessibility, 15-25 words.\n"

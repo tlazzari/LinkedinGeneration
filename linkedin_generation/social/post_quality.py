@@ -896,6 +896,34 @@ BLOCKING_MARKERS = (
 )
 
 
+# A QUESTION PEOPLE ANSWER (2026-09-29). Reach tracks comments, and the page drew almost none:
+# every post already ended on a question, but a sales question ("What challenges are you
+# facing?") or a yes/no one gives an engineer nothing to reply with. Cosmetic: one retry, then
+# it publishes - a dull question is not a false claim.
+_YES_NO_START = re.compile(
+    r"^\s*(?:do|does|did|are|is|was|were|have|has|can|could|would|will|should|shall)\b", re.I)
+_GENERIC_Q = re.compile(
+    r"\bwhat\b[^?]{0,40}?\b(?:challenges?|problems?|issues?|hurdles?|pain points?)\b"
+    r"|\b(?:solving|facing|tackling|dealing with)\b.*\b(?:right now|today|currently|these days)\b"
+    r"|\bthoughts\s*\?|\bagree\s*\?|\bshare your (?:thoughts|experience|views?)\b"
+    r"|\bhow can we help\b|\blet us know\b",
+    re.I)
+
+
+def generic_closing_question(cta: str) -> str:
+    """The closing question when it is generic or yes/no, else "".
+
+    Only the LAST question counts: a CTA may ask a yes/no lead-in and then the real question.
+    """
+    questions = [q.strip() for q in re.findall(r"[^.!?]*\?", cta or "") if q.strip()]
+    if not questions:
+        return ""
+    last = questions[-1]
+    if _YES_NO_START.search(last) or _GENERIC_Q.search(last):
+        return last
+    return ""
+
+
 def blocking_issues(issues: Sequence[str]) -> List[str]:
     """The subset of `issues` that must prevent publication."""
     return [i for i in issues if any(m in i.lower() for m in BLOCKING_MARKERS)]
@@ -1158,6 +1186,11 @@ def post_issues(
 
     if voice.require_closing_question and not is_holiday and "?" not in cta:
         issues.append("closing paragraph asks no question - end on a genuine open question")
+    elif voice.require_closing_question and not is_holiday and generic_closing_question(cta):
+        issues.append(
+            "closing question is generic or yes/no (" + generic_closing_question(cta)[:80] + ") - "
+            "ask something the reader answers from their own work: a value they measure, a choice "
+            "they made, a failure they have seen")
 
     for term in (() if is_holiday else voice.overused_headline_terms):
         if term in headline.lower():

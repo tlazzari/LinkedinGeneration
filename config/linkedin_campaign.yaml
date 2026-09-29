@@ -12,11 +12,12 @@ defaults:
     future-ready bearing innovations.
 
     '
+  # Brand tag first - it is always kept. max_hashtags caps the whole block (2026-09-29).
   hashtags:
   - '#TNTMotion'
-  - '#BearingExperts'
-  - '#MechanicalDesign'
-  - '#PrecisionEngineering'
+  - '#Manufacturing'
+  - '#Engineering'
+  max_hashtags: 4
 schedule:
   timezone: Europe/Rome
   slots:
@@ -65,9 +66,9 @@ content_pillars:
   - Which bearing myth has cost you the most? Drop it in the comments
   - DM us your toughest bearing question - we will myth-bust it live
   hashtags:
-  - '#BearingMyths'
-  - '#EngineeringFacts'
-  - '#MaintenanceTruth'
+  - '#Bearings'
+  - '#Maintenance'
+  - '#ReliabilityEngineering'
   image_prompt: 'Dramatic close-up of a failed bearing cut in half showing internal damage, forensic
 
     lighting style, metallic textures with visible wear patterns, industrial laboratory setting.
@@ -100,9 +101,9 @@ content_pillars:
   - Got a mystery failure you never solved? Share it - let us investigate together
   - Tag a colleague who would appreciate this forensic breakdown
   hashtags:
+  - '#Bearings'
   - '#FailureAnalysis'
   - '#ReliabilityEngineering'
-  - '#RootCauseAnalysis'
   image_prompt: 'Engineer with magnifying glass examining damaged bearing under bright forensic lighting,
 
     data charts and vibration graphs visible on screen in background, industrial diagnostic setting.
@@ -161,9 +162,9 @@ content_pillars:
   - What is the most extreme environment your bearings operate in?
   - Designing something demanding? Let us engineer the bearing solution together
   hashtags:
-  - '#ExtremeEngineering'
-  - '#HighPerformance'
-  - '#BearingInnovation'
+  - '#Bearings'
+  - '#HeavyIndustry'
+  - '#ReliabilityEngineering'
   image_prompt: 'Dramatic industrial scene showing machinery in extreme environment - either frozen
 
     industrial setting with ice crystals, or high-tech cleanroom with robotic arms,
@@ -196,9 +197,9 @@ content_pillars:
   - What would you want to see from inside our operations? Tell us in the comments
   - Questions for our engineering team? We read every message
   hashtags:
-  - '#BehindTheScenes'
-  - '#EngineeringLife'
-  - '#QualityMatters'
+  - '#Manufacturing'
+  - '#QualityControl'
+  - '#Bearings'
   image_prompt: 'Authentic workshop scene with engineer examining bearing with precision instruments,
 
     warm industrial lighting, workbench with tools and technical drawings visible,
@@ -289,26 +290,26 @@ content_pillars:
   - Tell us your spindle taper and the tools you run, and we will match the holder
   - Tag a toolroom engineer who specifies their own toolholding
   # Pillar tags go on EVERY post of the pillar; product tags only when the post names it.
-  hashtags:
-  - '#PrecisionComponents'
+  hashtags: []          # Product Spotlight: every tag comes from the product the post names
   product_hashtags:
-    toolholder: ['#Toolholders', '#Toolholding', '#CNCMachining']
-    hydraulic: ['#HydraulicChuck', '#Toolholding', '#CNCMachining']
-    shrink: ['#ShrinkFit', '#Toolholding', '#CNCMachining']
-    er collet: ['#Collets', '#ERCollets', '#CNCMachining']
-    eoc: ['#Collets', '#CNCMachining']
-    tapping: ['#Tapping', '#Threading', '#CNCMachining']
-    nut: ['#ERCollets', '#Workholding']
-    adapter: ['#Collets', '#Workholding']
-    deep groove: ['#BallBearings', '#Bearings']
-    tapered roller: ['#RollerBearings', '#Bearings']
-    spherical roller: ['#RollerBearings', '#Bearings']
-    cylindrical roller: ['#RollerBearings', '#Bearings']
-    y-bearing: ['#Bearings', '#PowerTransmission']
-    needle: ['#NeedleBearings', '#Bearings']
-    turbine: ['#WindEnergy']
+    # Trade tags people search for (2026-09-29), not brand slogans. Max 4 per post incl. #TNTMotion.
+    toolholder: ['#CNC', '#Machining', '#Toolholding']
+    hydraulic: ['#CNC', '#Machining', '#Toolholding']
+    shrink: ['#CNC', '#Machining', '#Toolholding']
+    er collet: ['#CNC', '#Machining', '#Collets']
+    eoc: ['#CNC', '#Machining', '#Collets']
+    tapping: ['#CNC', '#Machining', '#Tapping']
+    nut: ['#CNC', '#Machining', '#Collets']
+    adapter: ['#Machining', '#MetalWorking', '#Collets']
+    deep groove: ['#Bearings', '#PowerTransmission', '#Maintenance']
+    tapered roller: ['#Bearings', '#PowerTransmission', '#Maintenance']
+    spherical roller: ['#Bearings', '#Mining', '#Maintenance']
+    cylindrical roller: ['#Bearings', '#PowerTransmission', '#Maintenance']
+    y-bearing: ['#Bearings', '#PowerTransmission', '#Maintenance']
+    needle: ['#Bearings', '#PowerTransmission', '#Maintenance']
+    hybrid: ['#Bearings', '#ElectricMotors']
     z3v3: ['#Bearings', '#ElectricMotors']
-    hybrid: ['#HybridBearings', '#ElectricMotors']
+    turbine: ['#WindEnergy']
   image_prompt: >
     Clean industrial macro photography of the one product the post is about, on a machined steel
     surface — a toolholder, collet, hydraulic chuck or tapping collet, or a ball, tapered, spherical,
@@ -368,11 +369,9 @@ content_pillars:
   - Suspecting spindle runout? The pull stud is the first thing to check — DM us
   - Tag a toolroom engineer who specifies their own workholding
   hashtags:
-  - '#CNCMachining'
-  - '#Workholding'
-  - '#Collets'
-  - '#MorseTaper'
-  - '#ToolholderPrecision'
+  - '#CNC'
+  - '#Machining'
+  - '#Toolholding'
   image_prompt: >
     Macro studio photography of CNC workholding components arranged on a precision granite surface:
     an ER collet open and closed, a pull stud showing the threaded shank, and a Morse taper with

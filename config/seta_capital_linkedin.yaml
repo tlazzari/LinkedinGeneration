@@ -9,6 +9,7 @@ defaults:
   - '#MergersAndAcquisitions'
   - '#InvestmentBanking'
   - '#CorporateFinance'
+  max_hashtags: 4   # 2026-09-29, brand tag first and always kept
 schedule:
   timezone: Europe/Rome
   slots:

@@ -63,6 +63,10 @@ class CampaignConfig:
     timezone: str
     output_dir: Path
     image_provider: ImageProviderConfig
+    # Hashtags per post (2026-09-29). Posts ended with 8-11 tags; a long block reads as spam and
+    # LinkedIn now uses tags mainly to file a post under a topic. The brand tag (first default)
+    # always stays; the rest are taken in order product -> pillar -> model -> defaults.
+    max_hashtags: int = 4
 
     @classmethod
     def from_yaml(cls, path: Path) -> "CampaignConfig":
@@ -140,6 +144,7 @@ class CampaignConfig:
             timezone=timezone,
             output_dir=output_dir,
             image_provider=image_provider_cfg,
+            max_hashtags=int(defaults.get("max_hashtags", 4) or 0),
         )
 
 

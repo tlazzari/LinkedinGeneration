@@ -540,7 +540,7 @@ class LinkedInPostGenerator(BaseContentGenerator):
             "the part ever saved'.\n"
             "  Never write 'studies show' or 'industry data indicates'. Buyers here will check.\n"
             "- Do not reference or link to any external files, websites, or resources unless they appear directly in the post copy.\n"
-            "- Finish with 3-5 hashtags chosen from this pool and/or relevant variants: "
+            "- Finish with 2-3 hashtags from this pool (the post carries at most 4 in total): "
             f"{hashtag_pool}.\n"
             f"- Propose an image_prompt describing {image_hint} with cinematic industrial detail.\n"
             "- image_prompt and video_prompt must show the SUBJECT OF THIS POST - the actual "

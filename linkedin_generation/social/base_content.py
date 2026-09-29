@@ -141,7 +141,10 @@ class BaseContentGenerator:
         low = (text or "").lower()
         product_tags = [tag for kw, tags in (getattr(pillar, "product_hashtags", None) or {}).items()
                         if kw and kw in low for tag in tags]
-        for tag in [*existing, *pillar.hashtags, *product_tags, *self.campaign.default_hashtags]:
+        # Order = priority under the cap: the brand tag, then the curated tags (product, pillar),
+        # then the model's picks, then the remaining defaults.
+        defaults = list(self.campaign.default_hashtags)
+        for tag in [*defaults[:1], *product_tags, *pillar.hashtags, *existing, *defaults[1:]]:
             norm = tag.strip()
             if not norm:
                 continue
@@ -152,7 +155,8 @@ class BaseContentGenerator:
                 continue
             seen.add(upper)
             merged.append(norm)
-        return merged
+        cap = int(getattr(self.campaign, "max_hashtags", 0) or 0)
+        return merged[:cap] if cap > 0 else merged
 
 
 __all__ = ["GeneratedPost", "BaseContentGenerator"]
