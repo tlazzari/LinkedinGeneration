@@ -584,6 +584,17 @@ t.check('RULE: no pillar cites DIN 7337 (the blind-rivet standard)',
         '7337' not in str(_cy))   # the loaded config, not the audit comments
 t.check('RULE: Product Spotlight pillar tags fit every product it rotates through',
         not ({'#HybridBearings', '#TurbineBearings', '#HighTempEngineering'} & set(_spot.get('hashtags', []))))
+# user 2026-09-29: spotlight only what is in the CNC Tooling Catalogue
+t.check('RULE: Product Spotlight exists and is catalogue-only', bool(_spot) and 'catalogue' in _spot.get('name', '').lower())
+for _bad in ('hybrid', 'turbine', 'high temperature', 'preload', 'ceramic'):
+    t.check(f'RULE: Product Spotlight does not advertise non-catalogue "{_bad}"', _bad not in _spot_txt)
+import re as _re
+_all_pp = ' '.join(pp for p in _ps.values() if p.get('proof_points_are_specs') for pp in p.get('proof_points', []))
+for _m in _re.finditer(r'runout[^.;—]*?≤\s*0\.00\d\s*mm[^;—]*', _all_pp, _re.I):
+    t.check(f'RULE: a runout figure states where it is measured - "{_m.group(0)[:50]}"',
+            bool(_re.search(r'at (4×D|3× diameter|gauge length)|measured at|to ISO 7388-3', _m.group(0))))
+t.check('RULE: no runout figure in µm without its measuring position',
+        not _re.search(r'runout\s*≤\s*\d+\s*µm', _all_pp))
 t.check('RULE: Product Spotlight declares product_hashtags', bool(_spot.get('product_hashtags')))
 
 sys.path.insert(0, str(PKG_DIR))
