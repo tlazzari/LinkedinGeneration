@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from test_common import (
     TestRun, PROJECT_ROOT, SEO_ROOT, PKG_DIR, PYTHON_BIN,
     CAMPAIGN_YAML, py_help_ok, load_campaign, py_compile_ok, bash_n_ok,
+    undefined_names_in_package,
 )
 
 t = TestRun('TNT')
@@ -558,5 +559,17 @@ for _ok in [
     _found = (unbacked_first_person_claims(_ok, "", "TNT Motion")
               + absolute_claims(_ok))
     t.check(f'POSITIONING: allowed by decision - {_ok[:44]}', not _found)
+
+
+# === RULE: no module calls a name it never imported (2026-09-29) ===
+# py_compile passes on a missing import; the 07:00 post does not. This has
+# broken the daily run twice (recent_post_history 2026-09-17, recent_themes
+# 2026-09-29) and had silently disabled the duplicate-story gate, whose call
+# sat inside an except Exception. See undefined_names_in_package in test_common.
+_undef = undefined_names_in_package()
+t.check('RULE: every generator module imports every name it uses',
+        _undef == {},
+        '; '.join(k + ': ' + ', '.join(v) for k, v in _undef.items()))
+
 
 sys.exit(t.summary())
