@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Optional, Sequence, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 from .campaign_config import CampaignConfig, PostPillar
 import random
@@ -14,7 +14,14 @@ import random
 from .manual_knowledge import build_lubrication_installation_context, build_case_study_context
 from .base_content import GeneratedPost, BaseContentGenerator
 from .media_prompts import compose_media_prompt
-from .news_search import NewsArticle, build_news_context, recent_post_history, search_news_for_pillar
+from .news_search import (
+    NewsArticle,
+    build_news_context,
+    recent_post_history,
+    recent_themes,
+    repeats_recent_story,
+    search_news_for_pillar,
+)
 from .post_quality import (
     PLAIN_ENGLISH_DIRECTIVE,
     TNT_VOICE,
