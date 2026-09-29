@@ -134,10 +134,14 @@ class BaseContentGenerator:
 
         raise ValueError(f"LLM response was not valid JSON: {raw}")
 
-    def _merge_hashtags(self, existing: list[str], pillar: PostPillar) -> list[str]:
+    def _merge_hashtags(self, existing: list[str], pillar: PostPillar, text: str = "") -> list[str]:
         seen: set[str] = set()
         merged: list[str] = []
-        for tag in [*existing, *pillar.hashtags, *self.campaign.default_hashtags]:
+        # Product tags only for the product the post is actually about (2026-09-29).
+        low = (text or "").lower()
+        product_tags = [tag for kw, tags in (getattr(pillar, "product_hashtags", None) or {}).items()
+                        if kw and kw in low for tag in tags]
+        for tag in [*existing, *pillar.hashtags, *product_tags, *self.campaign.default_hashtags]:
             norm = tag.strip()
             if not norm:
                 continue

@@ -242,6 +242,9 @@ def campaign_for(brand_key: str) -> Optional["object"]:
             "proof_points": [str(x) for x in (p.get("proof_points") or []) if str(x).strip()],
             "ctas": [str(x) for x in (p.get("ctas") or []) if str(x).strip()],
             "hashtags": [str(x) for x in (p.get("hashtags") or []) if str(x).strip()],
+            # keyword -> tags, added only when the post names that product (2026-09-29, same as TNT).
+            "product_hashtags": {str(k): [str(t) for t in (v or [])] for k, v in
+                                 (p.get("product_hashtags") or {}).items()} if isinstance(p.get("product_hashtags"), dict) else {},
             "image_prompt": p.get("image_prompt") or None,
             # News is ON unless the tenant explicitly turned it off: a post built
             # on something that actually happened is the whole point.

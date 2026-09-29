@@ -572,4 +572,44 @@ t.check('RULE: every generator module imports every name it uses',
         '; '.join(k + ': ' + ', '.join(v) for k, v in _undef.items()))
 
 
+# === 2026-09-29: the rivet-nut post - wrong product, wrong standard, invented force ===
+import yaml as _yaml
+_cy = _yaml.safe_load(open(CAMPAIGN_YAML, encoding='utf-8'))
+_ps = {p['name']: p for p in _cy.get('content_pillars', [])}
+_spot = next((p for n, p in _ps.items() if n.startswith('Product Spotlight')), {})
+_spot_txt = (_spot.get('angle', '') + ' ' + ' '.join(_spot.get('proof_points', []))).lower()
+t.check('RULE: Product Spotlight offers no rivet nut (拉钉 is a PULL STUD; TNT sells no rivet nuts)',
+        'rivet' not in _spot_txt)
+t.check('RULE: no pillar cites DIN 7337 (the blind-rivet standard)',
+        '7337' not in str(_cy))   # the loaded config, not the audit comments
+t.check('RULE: Product Spotlight pillar tags fit every product it rotates through',
+        not ({'#HybridBearings', '#TurbineBearings', '#HighTempEngineering'} & set(_spot.get('hashtags', []))))
+t.check('RULE: Product Spotlight declares product_hashtags', bool(_spot.get('product_hashtags')))
+
+sys.path.insert(0, str(PKG_DIR))
+from social.post_quality import unsupported_statistics as _us
+t.check('FIGURES: an invented force is caught ("8,000 N")',
+        _us('Our steel rivet nuts deliver pull-out resistance up to 8,000 N for an M10 size.', '') == ['8,000 N'])
+t.check('FIGURES: a hardness is caught ("58 HRC")',
+        _us('The stud is hardened to 58 HRC.', '') != [])
+t.check('FIGURES: a sourced force passes',
+        _us('rated to 8,000 N', 'pull-out 8000 N per catalogue') == [])
+t.check('FIGURES: "10 new" is not a force',
+        _us('We added 10 new sizes.', '') == [])
+
+from social.base_content import BaseContentGenerator as _BCG
+from social.campaign_config import PostPillar as _PP
+class _Stub(_BCG):
+    def __init__(self):
+        class _C: default_hashtags = ['#TNTMotion']
+        self.campaign = _C()
+    def generate(self, *a, **k): pass
+_pp = _PP(name='x', target_client='', angle='', proof_points=[], ctas=[], hashtags=['#PrecisionComponents'],
+          product_hashtags={'turbine': ['#TurbineBearings'], 'collet': ['#Collets']})
+_tags = _Stub()._merge_hashtags([], _pp, text='ER collet runout matters')
+t.check('HASHTAGS: a collet post gets #Collets', '#Collets' in _tags)
+t.check('HASHTAGS: a collet post does not get #TurbineBearings', '#TurbineBearings' not in _tags)
+t.check('HASHTAGS: Bolla tenant pillars carry product_hashtags too', 'product_hashtags' in (PKG_DIR / 'social' / 'brand_store.py').read_text())
+
+
 sys.exit(t.summary())

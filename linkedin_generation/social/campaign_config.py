@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Sequence
+from typing import List, Sequence, Mapping
 
 import yaml
 
@@ -47,6 +47,10 @@ class PostPillar:
     # Whether this pillar's proof_points are checkable specifications (usable
     # as evidence) rather than narrated engagements (which steer only).
     proof_points_are_specs: bool = False
+    # keyword -> hashtags, added only when the post mentions the keyword (2026-09-29).
+    # Pillar-level `hashtags` go on every post, so a pillar that rotates through several
+    # products keeps its product tags here instead.
+    product_hashtags: Mapping[str, Sequence[str]] = field(default_factory=dict)
 
 @dataclass(frozen=True)
 class CampaignConfig:
@@ -108,6 +112,8 @@ class CampaignConfig:
                         entry.get("proof_points_are_specs", False)),
                     ctas=list(entry.get("ctas", [])),
                     hashtags=list(entry.get("hashtags", [])),
+                    product_hashtags={str(k).lower(): list(v) for k, v in
+                                      (entry.get("product_hashtags") or {}).items()},
                     image_prompt=entry.get("image_prompt"),
                     use_news_search=entry.get("use_news_search", False),
                     news_queries=[str(q).strip() for q in entry.get("news_queries", []) if str(q).strip()],

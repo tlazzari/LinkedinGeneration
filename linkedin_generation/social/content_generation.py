@@ -249,7 +249,9 @@ class LinkedInPostGenerator(BaseContentGenerator):
         if isinstance(hashtags, str):
             hashtags = [tag.strip() for tag in hashtags.split() if tag.strip()]
 
-        all_hashtags = self._merge_hashtags(list(hashtags), pillar)
+        all_hashtags = self._merge_hashtags(
+            list(hashtags), pillar,
+            text=" ".join(str(payload.get(k) or "") for k in ("headline", "body")))
         # Media has to show what the post is actually about (2026-09-13). TNT
         # took the model's prompt raw, with the pillar's fixed prompt as fallback
         # and no guardrail either way - so nothing stopped a stock skyline, and

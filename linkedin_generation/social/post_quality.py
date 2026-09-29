@@ -537,6 +537,9 @@ _STATISTIC = re.compile(
     # pattern wanted a degree symbol or the word "deg".
     r"|°\s?[CF]\b|deg\s?[CF]?\b|degrees?\s?[CF]?\b|\s[CF]\b"
     r"|rpm|r/min|bar\b|psi\b|mpa\b|kn\b|nm\b"
+    # force, hardness, density (2026-09-29): "pull-out resistance up to 8,000 N"
+    # was invented and passed, because newtons were not on this list.
+    r"|newtons?|kgf|n\b|hrc\b|hv\b|g/cm\S?"
     r"|microns?|µm|um\b|mm\b|kg\b|tonnes?|tons?"
     r"|db\b|watts?|kw\b|volts?)\b"
     r"|\d+\.\d{2,}",
