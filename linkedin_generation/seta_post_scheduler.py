@@ -28,6 +28,7 @@ from linkedin_generation.social.image_providers import (
     ImageProviderConfig,
     GoogleImagenProvider,
     ReplicateVideoProvider,
+    AlibabaVideoProvider,
     create_image_provider,
 )
 from linkedin_generation.social.news_search import fetch_article_preview_image
@@ -337,7 +338,14 @@ def generate_video_for_post(
         logging.info("Google Veo video generated: %s", video_path)
         return video_path
     except Exception as exc:
-        logging.warning("Google Veo also failed — falling back to static image: %s", exc)
+        logging.warning("Google Veo also failed, trying Alibaba HappyHorse: %s", exc)
+
+    try:
+        video_path = AlibabaVideoProvider().get_video(prompt=video_prompt, target_dir=target_dir)
+        logging.info("Alibaba HappyHorse video generated: %s", video_path)
+        return video_path
+    except Exception as exc:
+        logging.warning("Alibaba video also failed — falling back to static image: %s", exc)
 
     return None
 

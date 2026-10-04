@@ -358,7 +358,16 @@ class GoogleImagenProvider:
                 "402" in str(exc) or "prepayment" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc)
             ):
                 logging.warning("Gemini image call failed (%s) — falling back to OpenRouter", str(exc)[:120])
-                return self._image_via_openrouter(model, prompt_text)
+                try:
+                    return self._image_via_openrouter(model, prompt_text)
+                except Exception as exc2:                  # noqa: BLE001
+                    if not os.getenv("ALIBABA_TOKEN_PLAN_KEY"):
+                        raise
+                    logging.warning("OpenRouter image fallback failed (%s) — trying Alibaba wan2.7-image", str(exc2)[:120])
+                    return self._image_via_alibaba(prompt_text)
+            if os.getenv("ALIBABA_TOKEN_PLAN_KEY"):
+                logging.warning("Gemini image call failed (%s) — trying Alibaba wan2.7-image", str(exc)[:120])
+                return self._image_via_alibaba(prompt_text)
             raise
         for candidate in getattr(response, "candidates", None) or []:
             content = getattr(candidate, "content", None)
@@ -369,6 +378,33 @@ class GoogleImagenProvider:
                     mime = getattr(inline, "mime_type", "") or "image/png"
                     return bytes(data), ("jpg" if "jpeg" in mime else "png")
         raise RuntimeError(f"{model} returned no inline image data")
+
+    def _image_via_alibaba(self, prompt_text: str) -> tuple[bytes, str]:
+        """wan2.7-image on the Alibaba Token Plan (already paid for)."""
+        import requests
+
+        ratio = {"16:9": "1920*1080", "1:1": "1440*1440", "9:16": "1080*1920", "4:3": "1664*1248"}
+        size = ratio.get(self.config.aspect_ratio or "16:9", "1920*1080")
+        base = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
+        resp = requests.post(
+            f"{base}/api/v1/services/aigc/multimodal-generation/generation",
+            headers={"Authorization": f"Bearer {os.environ['ALIBABA_TOKEN_PLAN_KEY']}"},
+            json={
+                "model": "wan2.7-image",
+                "input": {"messages": [{"role": "user", "content": [{"text": prompt_text}]}]},
+                "parameters": {"size": size, "n": 1, "watermark": False},
+            },
+            timeout=180,
+        )
+        if not resp.ok:
+            raise RuntimeError(f"Alibaba image fallback failed ({resp.status_code}): {resp.text[:300]}")
+        for choice in (resp.json().get("output") or {}).get("choices") or []:
+            for part in (choice.get("message") or {}).get("content") or []:
+                if part.get("image"):
+                    img = requests.get(part["image"], timeout=120)
+                    img.raise_for_status()
+                    return img.content, "png"
+        raise RuntimeError("Alibaba image fallback returned no image")
 
     def _image_via_openrouter(self, model: str, prompt_text: str) -> tuple[bytes, str]:
         import base64
@@ -520,6 +556,56 @@ class GoogleImagenProvider:
             return response.content
         except requests.RequestException as exc:
             raise RuntimeError(f"Failed to download Veo video from {url}") from exc
+
+
+class AlibabaVideoProvider:
+    """HappyHorse text-to-video on the Alibaba Token Plan (already paid for; Veo fallback).
+
+    Async job: submit, poll /tasks/{id}, download the mp4. 1080p 16:9, ~100 s per 5 s clip.
+    """
+
+    BASE = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
+    MODEL = "happyhorse-1.1-t2v"
+
+    def __init__(self, config: ImageProviderConfig | None = None) -> None:
+        key = os.getenv("ALIBABA_TOKEN_PLAN_KEY")
+        if not key:
+            raise RuntimeError("ALIBABA_TOKEN_PLAN_KEY must be set for the Alibaba video provider")
+        self._headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+        self.config = config
+
+    def get_video(self, *, prompt: str, target_dir: Path) -> Path:
+        import requests
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        body = {
+            "model": self.MODEL,
+            "input": {"prompt": prompt},
+            "parameters": {"watermark": False, "ratio": "16:9"},
+        }
+        r = requests.post(
+            f"{self.BASE}/api/v1/services/aigc/video-generation/video-synthesis",
+            headers={**self._headers, "X-DashScope-Async": "enable"}, json=body, timeout=60,
+        )
+        if not r.ok:
+            raise RuntimeError(f"Alibaba video submit failed ({r.status_code}): {r.text[:300]}")
+        task_id = r.json()["output"]["task_id"]
+        deadline = time.time() + 600
+        while time.time() < deadline:
+            time.sleep(10)
+            t = requests.get(f"{self.BASE}/api/v1/tasks/{task_id}", headers=self._headers, timeout=30)
+            t.raise_for_status()
+            out = t.json().get("output", {})
+            status = out.get("task_status")
+            if status == "SUCCEEDED":
+                video = requests.get(out["video_url"], timeout=180)
+                video.raise_for_status()
+                path = target_dir / f"happyhorse_{int(time.time())}.mp4"
+                path.write_bytes(video.content)
+                return path
+            if status in ("FAILED", "CANCELED", "UNKNOWN"):
+                raise RuntimeError(f"Alibaba video task {status}: {out.get('message') or out}")
+        raise RuntimeError("Alibaba video task timed out after 600s")
 
 
 class CuratedLibraryImageProvider:
