@@ -347,9 +347,19 @@ class GoogleImagenProvider:
                 )
             except (ImportError, AttributeError, TypeError):
                 config = None       # older SDK — take the model's default framing
-        response = self._genai_client.models.generate_content(
-            model=model, contents=prompt_text, config=config
-        )
+        try:
+            response = self._genai_client.models.generate_content(
+                model=model, contents=prompt_text, config=config
+            )
+        except Exception as exc:                           # noqa: BLE001
+            # Gemini prepaid credits depleted (402 / RESOURCE_EXHAUSTED, 2026-10-02): same model, billed
+            # to OpenRouter, instead of losing the post.
+            if os.getenv("OPENROUTER_API_KEY") and (
+                "402" in str(exc) or "prepayment" in str(exc) or "RESOURCE_EXHAUSTED" in str(exc)
+            ):
+                logging.warning("Gemini image call failed (%s) — falling back to OpenRouter", str(exc)[:120])
+                return self._image_via_openrouter(model, prompt_text)
+            raise
         for candidate in getattr(response, "candidates", None) or []:
             content = getattr(candidate, "content", None)
             for part in getattr(content, "parts", None) or []:
@@ -359,6 +369,33 @@ class GoogleImagenProvider:
                     mime = getattr(inline, "mime_type", "") or "image/png"
                     return bytes(data), ("jpg" if "jpeg" in mime else "png")
         raise RuntimeError(f"{model} returned no inline image data")
+
+    def _image_via_openrouter(self, model: str, prompt_text: str) -> tuple[bytes, str]:
+        import base64
+        import requests
+
+        body: Dict[str, Any] = {
+            "model": f"google/{model}",
+            "modalities": ["image", "text"],
+            "messages": [{"role": "user", "content": prompt_text}],
+        }
+        if self.config.aspect_ratio:
+            body["image_config"] = {"aspect_ratio": self.config.aspect_ratio}
+        resp = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}"},
+            json=body,
+            timeout=180,
+        )
+        if not resp.ok:
+            raise RuntimeError(f"OpenRouter image fallback failed ({resp.status_code}): {resp.text[:300]}")
+        for choice in resp.json().get("choices") or []:
+            for img in (choice.get("message") or {}).get("images") or []:
+                url = (img.get("image_url") or {}).get("url", "")
+                if url.startswith("data:") and "," in url:
+                    head, b64 = url.split(",", 1)
+                    return base64.b64decode(b64), ("jpg" if "jpeg" in head else "png")
+        raise RuntimeError("OpenRouter image fallback returned no image")
 
     def get_image(self, *, prompt: str, target_dir: Path, alt_text: str | None = None) -> ImagePayload:
         target_dir.mkdir(parents=True, exist_ok=True)
