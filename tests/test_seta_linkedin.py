@@ -2468,4 +2468,26 @@ t.check('EXPERIENCE: the fallback keeps the question last', _fixed['cta'].rstrip
 t.check('EXPERIENCE: the fallback does not name Seta twice', _fixed['cta'].count('Seta Capital') == 1, _fixed['cta'])
 t.check('EXPERIENCE: holiday posts are exempt', not _ei(_bad, _P(), holiday=object()))
 
+# ============================================================================
+# PUBLIC IN CHINESE (2026-10-20): the Geely post refused for a name its own
+# Chinese source printed as 吉利. The waiver must see the Chinese name.
+# ============================================================================
+from linkedin_generation.social.confidentiality import _chinese_aliases
+_zh_src = '巴黎车展中国品牌增至约二十家 吉利借极氪9X和本地化生产应对欧盟关税'
+_geely_post = 'At the Paris Motor Show, Geely is answering EU tariffs with local production.'
+t.check('ZH-PUBLIC: Geely is a counterparty, so with no source it is blocked',
+        any('Geely' in i for i in confidentiality_issues(_geely_post)))
+t.check('ZH-PUBLIC: Geely is waived when the Chinese source names 吉利',
+        not any('Geely' in i for i in confidentiality_issues(_geely_post, public_context=_zh_src)))
+t.check('ZH-PUBLIC: an unrelated Chinese article does NOT waive Geely',
+        any('Geely' in i for i in confidentiality_issues(
+            _geely_post, public_context='乐动机器人收购欧洲园林装备品牌SABO')))
+t.check('ZH-PUBLIC: 吉利 does not launder a DIFFERENT counterparty',
+        any('Fosun' in i for i in confidentiality_issues(
+            'Geely and Fosun are both looking at Europe.', public_context=_zh_src)))
+t.check('ZH-PUBLIC: aliases match the exact list entry, not a longer name',
+        _chinese_aliases('Fosun') and not _chinese_aliases('Fosun Capital Investment & Management'))
+t.check('ZH-PUBLIC: confidential deck figures stay blocked whatever the source',
+        bool(confidentiality_issues('It closed at 11x EBITDA.', public_context=_zh_src + ' 11x EBITDA')))
+
 sys.exit(t.summary())

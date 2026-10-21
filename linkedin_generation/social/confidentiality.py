@@ -117,6 +117,36 @@ OWN_NAMES = (
 )
 
 
+# The Chinese names a counterparty is printed under in the Chinese press.
+# WHY (2026-10-20): the "already public" waiver compared the ENGLISH name in the
+# post with the article text. Seta's news is searched in Chinese first, so the
+# article says 吉利 and the post says "Geely" - the waiver could never fire, and
+# a post built on a 虎嗅 piece about Geely at the Paris Motor Show was refused
+# twice and nothing went out that Tuesday. Same gap for every company whose
+# English and Chinese names differ, which is nearly all of them.
+# Fails SAFE: a name missing here is simply blocked, exactly as before. Add ONLY
+# the company's own Chinese name (as the press prints it), never a sector word.
+# Keys match the counterparty-list entry exactly (case-insensitive) - "Fosun"
+# does not stretch to "Fosun Capital Investment & Management".
+ORG_ALIASES_ZH = {
+    "Geely": ("吉利",), "Fosun": ("复星",), "Alibaba": ("阿里巴巴",),
+    "Alibaba Group": ("阿里巴巴",), "Alibaba Inc": ("阿里巴巴",),
+    "Midea": ("美的集团", "美的"), "Tencent": ("腾讯",), "CRRC": ("中车",),
+    "Lenovo": ("联想",), "Pirelli": ("倍耐力",), "Ansaldo Breda": ("安萨尔多",),
+    "BYD": ("比亚迪",), "Haier": ("海尔",), "Weichai": ("潍柴",), "SANY": ("三一重工",),
+    "Zoomlion": ("中联重科",), "CATL": ("宁德时代",), "Chery": ("奇瑞",),
+    "SAIC": ("上汽",), "Great Wall Motor": ("长城汽车",), "ChemChina": ("中国化工",),
+    "Hisense": ("海信",), "Huawei": ("华为",), "Xiaomi": ("小米",),
+    "Wanxiang": ("万向",), "Joyson": ("均胜",), "Dongfeng": ("东风",),
+    "FAW": ("一汽",), "XCMG": ("徐工",), "Fuyao": ("福耀",), "Zeekr": ("极氪",),
+    "Leapmotor": ("零跑",), "Volvo Cars": ("沃尔沃",), "Ferretti": ("法拉帝",),
+}
+_ALIASES_BY_KEY = {k.lower(): v for k, v in ORG_ALIASES_ZH.items()}
+
+
+def _chinese_aliases(name: str) -> tuple:
+    return _ALIASES_BY_KEY.get((name or "").strip().lower(), ())
+
 @lru_cache(maxsize=1)
 def _dictionary_words() -> frozenset:
     """Ordinary words, so an extraction artefact is not mistaken for a company.
@@ -254,7 +284,10 @@ def confidentiality_issues(text: str, public_context: str = "") -> List[str]:
     public = (public_context or "").lower()
 
     def _is_already_public(name: str) -> bool:
-        return bool(name) and name.lower() in public
+        if not name:
+            return False
+        return name.lower() in public or any(
+            a in public for a in _chinese_aliases(name))
     known = _known_names()
     if not known["loaded"]:
         return ["the counterparty list could not be loaded - refusing to clear this post"]
