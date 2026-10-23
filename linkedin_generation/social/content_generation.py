@@ -303,7 +303,11 @@ class LinkedInPostGenerator(BaseContentGenerator):
         url_pattern = _re.compile(r'\[?(https?://[^\s\]\)]+)\]?(?:\([^\)]+\))?')
         for name in ("body", "headline", "cta"):
             if name in payload and isinstance(payload[name], str):
-                payload[name] = _re.sub(r'\s{2,}', ' ', url_pattern.sub('', payload[name])).strip()
+                # Horizontal whitespace only (2026-10-23): \s{2,} also collapsed the blank
+                # lines between paragraphs, so every post arrived as one block.
+                _clean = _re.sub(r'[ \t]{2,}', ' ', url_pattern.sub('', payload[name]))
+                _clean = _re.sub(r'[ \t]+\n', '\n', _clean)
+                payload[name] = _re.sub(r'\n{3,}', '\n\n', _clean).strip()
         return payload
 
     def _build_prompt(

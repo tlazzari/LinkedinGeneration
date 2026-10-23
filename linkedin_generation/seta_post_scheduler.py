@@ -20,6 +20,7 @@ from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
 from commonlib.llm_clients import QuotaExceededError, create_llm_client
+from linkedin_generation.social.variation import choose as choose_variation
 from linkedin_generation.social import CampaignConfig, PostPillar
 from linkedin_generation.social.seta_content_generation import SetaLinkedInPostGenerator, GeneratedPost
 from linkedin_generation.social.linkedin_client import LinkedInPublisher, LinkedInPublisherConfig
@@ -447,6 +448,18 @@ def run_single_generation(
     # A post blocked on confidentiality ends the run - it must not be retried
     # into existence or published in any other form. Skipping a slot is the
     # correct outcome: see ConfidentialityBlocked in seta_content_generation.
+    # The FORM of this post - shape, opening, length, ending, hashtag count - is drawn
+    # per brand and day, demoting whatever the last posts used (social/variation.py,
+    # 2026-10-23). The rules do not vary; only the form does.
+    try:
+        from linkedin_generation.social.news_search import recent_post_history
+        _history = recent_post_history(str(output_dir), days=60)["posts"]
+    except Exception:      # history is an optimisation, never a hard dependency
+        _history = []
+    variation = choose_variation(brand_key, scheduled_for.date(), _history,
+                                 getattr(campaign, "variation", None) or {})
+    logging.info("VARIATION: %s", dict(variation.choices) or "off")
+
     try:
         post = generator.generate(
             pillar=pillar,
@@ -454,6 +467,7 @@ def run_single_generation(
             post_type=post_type,
             image_mode="photo",
             chart_data=chart_data_summary,
+            variation=variation,
         )
     except QualityBlocked as exc:
         # A post that contradicts its own data, or cites figures from nowhere, is
@@ -642,6 +656,12 @@ def run_single_generation(
             # demotes posts carrying an outbound link. Best effort only - the post
             # is already live, so a failure here is logged and swallowed.
             comment = build_source_comment(post.news_articles)
+            if comment and not getattr(campaign, "source_comment", True):
+                # Seta, 2026-10-23: the bot's own link comment was the only comment its
+                # posts ever got. The outlet is named in the body; the URLs stay in the
+                # artefact.
+                extra_metadata["source_comment"] = "off"
+                comment = ""
             if comment:
                 result = publisher.comment_on_post(
                     share_urn=publish_result["share_urn"], text=comment,

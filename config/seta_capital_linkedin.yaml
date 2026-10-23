@@ -12,11 +12,27 @@ defaults:
   max_hashtags: 4   # 2026-09-29, brand tag first and always kept
 schedule:
   timezone: Europe/Rome
+  # ONE post a week (Tom 2026-10-23), on a day drawn at random among the slots below,
+  # so the page does not post on the same weekday every week. Was Tue + Thu every week.
+  # Holiday greetings come on top. Code: holiday/scheduler.py _week_picks().
+  posts_per_week: 1
   slots:
   - day: Tuesday
     time: '10:00'
+  - day: Wednesday
+    time: '10:00'
   - day: Thursday
-    time: '15:00'
+    time: '10:00'
+# The source links used to go out as the page's own first comment (2026-09-13). Off
+# 2026-10-23: it was the only comment Seta posts ever got - LinkedIn sees a page talking to
+# itself. The outlet and date stay named in the body; the URLs stay in the artefacts.
+source_comment: false
+# Each post's FORM (shape, opening, length, ending, hashtag count) is drawn at random,
+# demoting what the last 3 posts used - social/variation.py (Tom 2026-10-23). Defaults
+# live in the code; tune weights here, 0 switches an option off. The rules never vary.
+variation:
+  enabled: true
+  weights: {}
 image_provider:
   provider: google-imagen
   model: gemini-3.1-flash-image

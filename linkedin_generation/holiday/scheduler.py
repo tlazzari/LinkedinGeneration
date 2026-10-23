@@ -161,8 +161,38 @@ class HolidayAwareScheduler:
             result.add(day_map[key])
         return result
 
+    def _week_picks(self, day: date) -> list:
+        """The slot weekdays drawn for `day`'s ISO week (2026-10-23).
+
+        Seeded on the brand's output dir and the week, so every daily run of the same
+        week agrees on the draw, and a test can pin it.
+        """
+        import random
+        k = int(getattr(getattr(self, "campaign", None), "posts_per_week", 0) or 0)
+        days = sorted(self._regular_days)
+        if k <= 0 or k >= len(days):
+            return days
+        year, week, _ = day.isocalendar()
+        rng = random.Random(f"{self.state_path.parent.name}:{year}-W{week:02d}")
+        return sorted(rng.sample(days, k))
+
     def _is_regular_post_day(self, day: date) -> bool:
-        return day.weekday() in self._regular_days
+        if day.weekday() not in self._regular_days:
+            return False
+        picks = self._week_picks(day)
+        if day.weekday() in picks:
+            return True
+        # A drawn day earlier this week went by with nothing published (a gate refused
+        # the draft): the next slot day writes a FRESH post, which must clear every gate
+        # on its own - the same trade as the holiday catch-up above. No backlog beyond
+        # the week.
+        missed = [w for w in picks if w < day.weekday()]
+        if not missed:
+            return False
+        monday = day - timedelta(days=day.weekday())
+        published = sum(self._published_on(monday + timedelta(days=d))
+                        for d in range(day.weekday()))
+        return published < len(missed)
 
     def _next_regular_pillar(self) -> PostPillar:
         # reuse CampaignState rotation by leveraging the standard state file

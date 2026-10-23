@@ -534,7 +534,8 @@ t.check('RULE: sourcing check is skipped when no sources are supplied',
 
 _gen_src2 = (PKG_DIR / 'social' / 'seta_content_generation.py').read_text()
 t.check('RULE: generator passes fetched sources into the gate',
-        'post_issues(payload, SETA_VOICE, sources=sources' in _gen_src2)
+        'post_issues(payload, voice, sources=sources' in _gen_src2
+        and 'voice = SETA_VOICE if self._variation is None' in _gen_src2)
 t.check('RULE: sources include chart data, news context and proof points',
         'chart_data, news_context' in _gen_src2 and 'pillar.proof_points' in _gen_src2)
 t.check('RULE: prompt forbids inventing statistics',
@@ -1962,9 +1963,9 @@ import json as _json_mod
 
 _CLEAN = {
     "headline": "German capital shifts toward China",
-    "body": ("German direct investment into China rose sharply in the first half of "
-             "2026, according to Deutsche Welle.\n\n"
-             "The same report shows flows into the United States falling.\n\n"
+    "body": ("German direct investment into China kept rising in the first half of "
+             "2026.\n\n"
+             "Flows into the United States moved the other way.\n\n"
              "For a buyer, that changes which market the next deal comes from."),
     "cta": "Which way are your own flows moving? And you?",
     "hashtags": ["#MergersAndAcquisitions"],
@@ -2489,5 +2490,169 @@ t.check('ZH-PUBLIC: aliases match the exact list entry, not a longer name',
         _chinese_aliases('Fosun') and not _chinese_aliases('Fosun Capital Investment & Management'))
 t.check('ZH-PUBLIC: confidential deck figures stay blocked whatever the source',
         bool(confidentiality_issues('It closed at 11x EBITDA.', public_context=_zh_src + ' 11x EBITDA')))
+
+# 2026-10-23: the same post citing an outlet nobody fetched must not publish.
+_CITED = dict(_CLEAN)
+_CITED["body"] = ("German direct investment into China rose sharply in the first half of "
+                  "2026, according to Deutsche Welle.\n\nFlows into the United States fell.\n\n"
+                  "For a buyer, that changes which market the next deal comes from.")
+try:
+    SetaLinkedInPostGenerator(campaign=_camp, llm_client=_StubLLM(_CITED),
+                              strategy_text="x").generate(
+        pillar=_pillar, scheduled_for=_dt.datetime.now(), post_type="technical", image_mode="photo")
+    t.check('CITE: a no-news post citing Deutsche Welle is refused', False, 'it published')
+except Exception as _e:
+    t.check('CITE: a no-news post citing Deutsche Welle is refused',
+            type(_e).__name__ == 'QualityBlocked' and 'never fetched' in str(_e), str(_e)[:200])
+
+# ============================================================================
+# VARIATION ENGINE (2026-10-23). Tom: reposts reached almost nobody; every post had
+# the same skeleton. The FORM of each post is drawn at random (social/variation.py);
+# the rules never vary. Also: one post a week on a drawn day, no self-comment, the
+# paragraph-flattening bug, and the named-outlet-never-fetched gate.
+# ============================================================================
+from datetime import date as _vd, timedelta as _vtd
+from linkedin_generation.social import variation as _var
+from linkedin_generation.social.post_quality import (
+    repeated_phrasing as _rp, unfetched_citations as _uc, blocking_issues as _bi,
+    post_issues as _pi, SETA_VOICE as _SV)
+
+_v1 = _var.choose('seta', _vd(2026, 10, 27))
+t.check('VARIATION: a draw covers every dimension', set(_v1.choices) == set(_var.DIMENSIONS), _v1.choices)
+t.check('VARIATION: the same brand and day draw the same form (dry run == publish run)',
+        _var.choose('seta', _vd(2026, 10, 27)).choices == _v1.choices)
+_forms = {tuple(sorted(_var.choose('seta', _vd(2026, 11, 1) + _vtd(days=i)).choices.items())) for i in range(20)}
+t.check('VARIATION: 20 days give many different forms, not a template', len(_forms) >= 12, len(_forms))
+t.check('VARIATION: holiday posts are left alone', not _var.choose('seta', _vd(2026, 10, 27), post_type='holiday').choices)
+t.check('VARIATION: enabled=false switches it off', not _var.choose('seta', _vd(2026, 10, 27), config={'enabled': False}).choices)
+_off = [_var.choose('seta', _vd(2026, 1, 1) + _vtd(days=i), config={'weights': {'closing': {'takeaway': 0}}}).choices['closing']
+        for i in range(40)]
+t.check('VARIATION: weight 0 switches an option off', set(_off) == {'question'}, set(_off))
+_bad_cfg = _var.choose('seta', _vd(2026, 10, 27), config={'weights': {'nonsense': {'x': 1}, 'shape': {'nope': 3, 'numbered': 'abc'}}})
+t.check('VARIATION: a typo in a tenant config is ignored, never fatal', set(_bad_cfg.choices) == set(_var.DIMENSIONS))
+_hist = [{'variation_shape': 'event_read'}] * 3
+_with = sum(_var.choose('seta', _vd(2026, 1, 1) + _vtd(days=i), _hist).choices['shape'] == 'event_read' for i in range(200))
+_without = sum(_var.choose('seta', _vd(2026, 1, 1) + _vtd(days=i)).choices['shape'] == 'event_read' for i in range(200))
+t.check('VARIATION: a shape used in the last posts is drawn much less often', _with < _without / 2, f'{_with} vs {_without}')
+t.check('VARIATION: demoted, never banned (still drawn sometimes)', _with > 0, _with)
+_txt = ' '.join(o.directive for opts in _var.DIMENSIONS.values() for o in opts)
+t.check('VARIATION: directives are brand-neutral (Bolla tenants share them)',
+        not re.search(r'Seta|TNT|Europe-China|bearing', _txt), '')
+t.check('VARIATION: a takeaway ending lifts only the closing-question rule',
+        not _var.Variation(choices={'closing': 'takeaway'}).requires_closing_question
+        and _var.Variation(choices={'closing': 'question'}).requires_closing_question)
+
+_V = lambda **ch: _var.Variation(choices=ch, directives=('x',))
+t.check('FORM: numbered without numbers is flagged',
+        any('numbered' in i for i in _var.variation_issues({'body': 'a\n\nb'}, _V(shape='numbered'))))
+t.check('FORM: a takeaway that ends on a question is flagged',
+        bool(_var.variation_issues({'cta': 'What do you measure?'}, _V(closing='takeaway'))))
+t.check('FORM: length outside the drawn range is flagged',
+        bool(_var.variation_issues({'body': 'word ' * 200}, _V(length='short'))))
+t.check('FORM: a question in the headline satisfies a question opening',
+        not _var.variation_issues({'headline': 'Who pays the tariff?', 'body': 'Plain.'}, _V(opening='question')))
+_all_form = _var.variation_issues({'headline': 'h', 'body': 'word ' * 300, 'cta': 'Why?'},
+                                  _V(shape='numbered', length='short', opening='question', closing='takeaway'))
+t.check('FORM: form issues are cosmetic - never cost a post', len(_all_form) >= 3 and not _bi(_all_form), _all_form)
+_fx = _var.apply_form_fixes({'body': 'Three things matter: 1. Tariffs rise. 2. Plants move. 3. Owners sell.'}, _V(shape='numbered'))
+t.check('FORM: inline numbered points become their own paragraphs',
+        _fx['body'].count('\n\n') == 3 and '\n\n2. Plants' in _fx['body'], _fx['body'])
+_fx2 = _var.apply_form_fixes({'body': 'Intro. 2.\n\nGerman owners sell.'}, _V(shape='numbered'))
+t.check('FORM: a marker left dangling by reflow is moved to its point', '2. German' in _fx2['body'], _fx2['body'])
+
+from linkedin_generation.social.seta_content_generation import SetaLinkedInPostGenerator as _SG
+from linkedin_generation.social.content_generation import LinkedInPostGenerator as _TG
+_para = {'body': 'First paragraph here.\n\nSecond  paragraph https://x.com/a here.\n\n\n\nThird.'}
+_sp = _SG._strip_urls(dict(_para), [], 'technical')
+t.check('PARAGRAPHS: Seta keeps the blank lines between paragraphs (they were all flattened)',
+        _sp['body'].count('\n\n') == 2 and 'https' not in _sp['body'], repr(_sp['body']))
+_tp = _TG._strip_urls(dict(_para))
+t.check('PARAGRAPHS: TNT keeps them too', _tp['body'].count('\n\n') == 2 and 'https' not in _tp['body'], repr(_tp['body']))
+
+_stock = 'Over more than a decade of Europe-China mandates, Seta Capital has watched this happen.'
+t.check('REPEAT: the stock closing clause shared with 2 recent posts is flagged',
+        bool(_rp(_stock, [_stock + ' A', 'B ' + _stock, 'unrelated'])))
+t.check('REPEAT: shared with only one recent post is not', not _rp(_stock, [_stock, 'unrelated', 'other']))
+_rep_issues = _pi({'headline': 'h', 'body': 'a\n\nb', 'cta': _stock + ' Why does it matter?'}, _SV,
+                  recent_texts=[_stock, _stock])
+t.check('REPEAT: repeated wording is cosmetic, not blocking',
+        any('repeats wording' in i for i in _rep_issues) and not any('repeats wording' in i for i in _bi(_rep_issues)))
+
+_src = 'Source: Sina Finance (新浪财经), 21 Oct 2026. Observer Network'
+t.check('CITE: an outlet the pipeline never fetched is caught ("as reported by Handelsblatt")',
+        _uc('Growth slowed, as reported by Handelsblatt in August 2026.', _src) == ['Handelsblatt'])
+t.check('CITE: "According to the Financial Times" is caught case-insensitively',
+        'Financial Times' in _uc('According to the Financial Times, deals rose.', _src))
+t.check('CITE: a fetched outlet passes, with its Chinese name in brackets',
+        not _uc('Sina Finance (新浪财经) reported on 22 October that resin makers expand.', _src))
+t.check('CITE: pronouns and "recent data" are not outlets', not _uc('It reported a loss. According to recent data, fine.', _src))
+_cite_issues = _pi({'headline': 'h', 'body': 'a\n\nAs reported by Handelsblatt, b.', 'cta': 'Why?'}, _SV, sources=_src)
+t.check('CITE: an unfetched outlet BLOCKS the post', any('never fetched' in i for i in _bi(_cite_issues)), _cite_issues)
+
+class _VCamp:
+    posts_per_week = 1
+def _vsched(td):
+    s = object.__new__(HolidayAwareScheduler)
+    s.campaign = _VCamp(); s.calendars = {}
+    s.state_path = Path(td) / 'seta_posts' / 'state.json'; s.state_path.parent.mkdir(parents=True, exist_ok=True)
+    s._regular_days = {1, 2, 3}
+    return s
+with _tempfile.TemporaryDirectory() as _td:
+    _s = _vsched(_td)
+    _weeks = []
+    for w in range(20):
+        mon = _vd(2026, 11, 2) + _vtd(weeks=w)
+        _days = [d for d in range(7) if _s._is_regular_post_day(mon + _vtd(days=d))]
+        _weeks.append(_days)
+    t.check('WEEKLY: no more than one slot day a week when nothing was missed',
+            all(len(d) >= 1 for d in _weeks) and all(d[0] in (1, 2, 3) for d in _weeks), _weeks)
+    t.check('WEEKLY: the drawn day changes from week to week', len({d[0] for d in _weeks}) >= 2, _weeks)
+    t.check('WEEKLY: every run of the same week agrees on the draw',
+            _s._week_picks(_vd(2026, 11, 3)) == _s._week_picks(_vd(2026, 11, 5)))
+with _tempfile.TemporaryDirectory() as _td:
+    _s = _vsched(_td)
+    _mon = _vd(2026, 11, 2)
+    _pick = _s._week_picks(_mon)[0]
+    _later = [d for d in (1, 2, 3) if d > _pick]
+    if _later:
+        t.check('WEEKLY: a drawn day refused by a gate -> the next slot day writes a fresh post',
+                _s._is_regular_post_day(_mon + _vtd(days=_later[0])))
+        (Path(_td) / 'seta_posts' / ((_mon + _vtd(days=_pick)).strftime('%Y%m%d') + '_0800_x.json')).write_text('{}')
+        t.check('WEEKLY: once the drawn day published, no second post that week',
+                not _s._is_regular_post_day(_mon + _vtd(days=_later[0])))
+    else:
+        t.check('WEEKLY: last slot drawn this week - nothing after it to catch up', True)
+
+_sy3 = load_seta_campaign()
+t.check('RULE: Seta posts once a week (Tom 2026-10-23)', (_sy3.get('schedule') or {}).get('posts_per_week') == 1)
+t.check('RULE: Seta does not comment on its own posts (Tom 2026-10-23)', _sy3.get('source_comment') is False)
+t.check('RULE: Seta post form is varied', (_sy3.get('variation') or {}).get('enabled') is True)
+_sched_src = (PKG_DIR / 'seta_post_scheduler.py').read_text()
+t.check('WIRING: the scheduler draws a form and passes it to the generator',
+        'choose_variation(' in _sched_src and 'variation=variation' in _sched_src)
+t.check('WIRING: the source comment honours the campaign switch', 'getattr(campaign, "source_comment", True)' in _sched_src)
+t.check('WIRING: tenants carry variation + source_comment from their config',
+        '"variation": config.get("variation")' in (PKG_DIR / 'social' / 'brand_store.py').read_text())
+
+from linkedin_generation.social.campaign_config import CampaignConfig as _CC
+_camp = _CC.from_yaml(SETA_CAMPAIGN_YAML)
+_g = _SG(campaign=_camp, llm_client=None, strategy_text='test', brand_key='seta')
+_tl = next(p for p in _camp.pillars if p.name == 'Thought Leadership')
+_g._variation = _var.Variation(choices={'shape': 'numbered', 'closing': 'takeaway', 'hashtags': '3'},
+                               directives=('SHAPE: numbered test directive',))
+_g._recent_ctas = ['Over more than a decade of Europe-China mandates, Seta Capital has watched X.']
+_pr = _g._build_prompt(pillar=_tl, post_type='technical', image_mode='photo')
+t.check('PROMPT: the drawn form is in the prompt', 'SHAPE: numbered test directive' in _pr)
+t.check('PROMPT: the fixed "3-4 paragraphs" and "150-250 words" give way to the form',
+        '3-4 SHORT paragraphs' not in _pr and '150-250 words' not in _pr)
+t.check('PROMPT: a takeaway form does not demand a closing question',
+        'ENDS WITH A GENUINE OPEN QUESTION' not in _pr and 'must NOT end with a question' in _pr)
+t.check('PROMPT: recent closings are listed so they are not reused', 'Do not reuse the wording' in _pr)
+t.check('PROMPT: the stock decade clause is no longer given as an example to copy',
+        "e.g. 'Across more than a decade" not in _pr)
+_g._variation = None; _g._recent_ctas = []
+_pr0 = _g._build_prompt(pillar=_tl, post_type='technical', image_mode='photo')
+t.check('PROMPT: without a form the previous structure is unchanged',
+        '3-4 SHORT paragraphs' in _pr0 and 'ENDS WITH A GENUINE OPEN QUESTION' in _pr0)
 
 sys.exit(t.summary())

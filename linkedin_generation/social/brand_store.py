@@ -266,6 +266,10 @@ def campaign_for(brand_key: str) -> Optional["object"]:
             "hashtags": [str(h) for h in (config.get("default_hashtags") or []) if str(h).strip()],
         },
         "schedule": config.get("schedule") or {},
+        # Post variation (2026-10-23): every tenant gets the engine's defaults with
+        # nothing to configure; a config may tune weights or switch it off.
+        "variation": config.get("variation") or {},
+        "source_comment": config.get("source_comment", True),
         "content_pillars": entries,
         "output": {"directory": f"linkedin_generation/{brand_key}_posts"},
         # Without this the tenant inherits ImageProviderConfig's dataclass

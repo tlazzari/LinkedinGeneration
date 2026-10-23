@@ -71,6 +71,15 @@ class CampaignConfig:
     # LinkedIn now uses tags mainly to file a post under a topic. The brand tag (first default)
     # always stays; the rest are taken in order product -> pillar -> model -> defaults.
     max_hashtags: int = 4
+    # The form of each post is drawn by social/variation.py (2026-10-23). This holds the
+    # brand's overrides ({enabled, weights}); empty = the engine's defaults.
+    variation: Mapping = field(default_factory=dict)
+    # Posts per ISO week, drawn at random among the schedule's slot days (2026-10-23).
+    # 0 = post on every slot day, the behaviour before.
+    posts_per_week: int = 0
+    # Publish the article links as the first comment (2026-09-13). Seta turned it off
+    # 2026-10-23: the comment was the only 'engagement' its posts had, from itself.
+    source_comment: bool = True
 
     @classmethod
     def from_yaml(cls, path: Path) -> "CampaignConfig":
@@ -150,6 +159,9 @@ class CampaignConfig:
             output_dir=output_dir,
             image_provider=image_provider_cfg,
             max_hashtags=int(defaults.get("max_hashtags", 4) or 0),
+            variation=dict(data.get("variation") or {}),
+            posts_per_week=int(schedule_cfg.get("posts_per_week", 0) or 0),
+            source_comment=bool(data.get("source_comment", True)),
         )
 
 

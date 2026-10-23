@@ -893,6 +893,7 @@ BLOCKING_MARKERS = (
     "is a hostname, not a publication",        # a raw domain cited as an outlet
     "absolute claim no mechanism supports",    # "stops particle generation completely"
     "claims we did something",                 # unverifiable first-person feat
+    "outlet that was never fetched",           # a named source the pipeline never read
 )
 
 
@@ -922,6 +923,72 @@ def generic_closing_question(cta: str) -> str:
     if _YES_NO_START.search(last) or _GENERIC_Q.search(last):
         return last
     return ""
+
+
+# ─── A named outlet the pipeline never fetched (2026-10-23) ──────────────────
+# A dry run of the experience-led Thought Leadership pillar - which fetches NO news -
+# wrote "as reported by Handelsblatt in August 2026". vague_source_hits() catches
+# "recent reports"; a NAMED source passed, because a name looks like a citation. It
+# is the same invention with a masthead on it. Blocking: a reader who looks for that
+# article and does not find it stops trusting everything else on the page.
+_CITE_TOKEN = r"[A-Z][\w&'\-]*(?:\.[\w&'\-]+)*"
+_CITE_NAME = r"(" + _CITE_TOKEN + r"(?:\s+(?:of\s+|the\s+|de\s+)?" + _CITE_TOKEN + r"){0,4})"
+_CITED_BY = re.compile(r"\b(?i:reported by|according to|cited by|as reported in|published by|"
+                       r"wrote in|data from)\s+(?:the\s+)?" + _CITE_NAME)
+_NAME_REPORTED = re.compile(_CITE_NAME + r"\s+(?:\([^)]*\)\s+)?(?:reported|reports|wrote)\b")
+_NOT_OUTLETS = {"it", "this", "that", "the", "these", "they", "he", "she", "we", "recent",
+                "data", "media", "chinese", "european", "local", "state", "official", "analysts"}
+
+
+def unfetched_citations(text: str, sources: str) -> List[str]:
+    """Outlets the post cites that appear nowhere in what was fetched."""
+    have = (sources or "").lower()
+    out: List[str] = []
+    for rx in (_CITED_BY, _NAME_REPORTED):
+        for m in rx.finditer(text or ""):
+            name = m.group(1).strip(" .,'")
+            parts = name.split()
+            if not parts or parts[0].lower() in _NOT_OUTLETS:
+                continue
+            # Any significant word of the name found in the fetched text clears it.
+            # Lenient on purpose: a false block costs a post; this only has to catch
+            # the outlet that is not there at all.
+            words = [w for w in re.split(r"[\s']+", name.lower()) if len(w) > 2 and w not in ("the", "of")]
+            if words and not any(w in have for w in words) and name not in out:
+                out.append(name)
+    return out
+
+
+# ─── The same sentence in every post (2026-10-23) ─────────────────────────────
+# Every Seta post in October closed on "Over more than a decade of Europe-China
+# mandates, Seta Capital has watched..." - the prompt gave that clause as an EXAMPLE
+# and the model copied it verbatim, every time. Story-level dedup cannot see it (the
+# stories differ); a reader sees nothing else. Cosmetic: one retry, then it publishes.
+_WORD = re.compile(r"[a-z0-9\u4e00-\u9fff]+(?:'[a-z]+)?")
+
+
+def _ngrams(text: str, n: int) -> set:
+    words = _WORD.findall((text or "").lower())
+    return {" ".join(words[i:i + n]) for i in range(len(words) - n + 1)}
+
+
+def repeated_phrasing(text: str, recent_texts: Sequence[str], n: int = 6,
+                      min_posts: int = 2) -> List[str]:
+    """Runs of `n` words this post shares with at least `min_posts` recent posts."""
+    mine = _ngrams(text, n)
+    if not mine or len(recent_texts) < min_posts:
+        return []
+    counts: Dict[str, int] = {}
+    for other in recent_texts:
+        for gram in mine & _ngrams(other, n):
+            counts[gram] = counts.get(gram, 0) + 1
+    hits = sorted(g for g, c in counts.items() if c >= min_posts)
+    # collapse overlapping windows of one phrase into its first window
+    out: List[str] = []
+    for g in hits:
+        if not any(len(set(g.split()) & set(o.split())) >= n - 1 for o in out):
+            out.append(g)
+    return out[:3]
 
 
 def blocking_issues(issues: Sequence[str]) -> List[str]:
@@ -1101,6 +1168,7 @@ def post_issues(
     sources: Optional[str] = None,
     post_type: str = "",
     verified: Optional[str] = None,
+    recent_texts: Optional[Sequence[str]] = None,
 ) -> List[str]:
     """Every reason this post is not repost-worthy. Empty list == publishable.
 
@@ -1191,6 +1259,17 @@ def post_issues(
             "closing question is generic or yes/no (" + generic_closing_question(cta)[:80] + ") - "
             "ask something the reader answers from their own work: a value they measure, a choice "
             "they made, a failure they have seen")
+
+    if recent_texts and not is_holiday:
+        for gram in repeated_phrasing(whole, recent_texts):
+            # The quoted phrase must not trip a BLOCKING marker by accident: the stock
+            # clause contains "mandates", which would turn a style note into "no post".
+            safe = gram
+            for marker in BLOCKING_MARKERS:
+                if marker in safe:
+                    safe = safe.replace(marker, marker[:3] + "~")
+            issues.append(
+                f"repeats wording from several recent posts - say it differently: '{safe}'")
 
     for term in (() if is_holiday else voice.overused_headline_terms):
         if term in headline.lower():
@@ -1313,6 +1392,10 @@ def post_issues(
                 "statistics with no source in the fetched data — remove or replace "
                 + ", ".join(f"'{claim}'" for claim in invented)
             )
+        for name in unfetched_citations(whole_text, sources or ""):
+            issues.append(
+                f"cites an outlet that was never fetched - '{name}'. Cite only the "
+                "outlets in the material supplied, or make the point without a source")
         vague = vague_source_hits(whole_text)
         if vague:
             issues.append(
@@ -1375,6 +1458,8 @@ __all__ = [
     "vague_source_hits",
     "apply_fixes",
     "post_issues",
+    "repeated_phrasing",
+    "unfetched_citations",
     "promotional_hits",
     "reflow_paragraphs",
     "strip_promotional_sentences",

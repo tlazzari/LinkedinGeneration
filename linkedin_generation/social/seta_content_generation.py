@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import replace as _dc_replace
+
+from .variation import apply_form_fixes, variation_issues
+
 import re
 
 import json
@@ -91,7 +95,25 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         image_mode: str,
         holiday: "HolidayEvent" | None = None,
         chart_data: str = "",
+        variation: "Variation" | None = None,
     ) -> GeneratedPost:
+        # The FORM of this post (social/variation.py, 2026-10-23). Held on the instance
+        # so every prompt built in this run - first draft and both retries - carries it.
+        self._variation = variation if (variation and variation.choices
+                                        and post_type != "holiday") else None
+        try:
+            _hist_posts = self._recent_history()["posts"]
+        except Exception:      # history is an optimisation, never a hard dependency
+            _hist_posts = []
+        self._recent_ctas = [p.get("cta", "") for p in _hist_posts if p.get("cta")][-3:]
+        recent_texts = [" ".join(p.get(k, "") for k in ("headline", "body", "cta"))
+                        for p in _hist_posts][-6:]
+        # A 'takeaway' ending is a form choice, so the closing-question rule follows the
+        # variant. Every other rule in the voice is untouched.
+        voice = SETA_VOICE if self._variation is None else _dc_replace(
+            SETA_VOICE,
+            require_closing_question=SETA_VOICE.require_closing_question
+            and self._variation.requires_closing_question)
         # Search for news if pillar requires it
         news_articles: List[NewsArticle] = []
         news_context = ""
@@ -155,8 +177,10 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
 
         # A prompt is a request, not a guarantee: check what came back and give
         # the model one corrective pass before falling back to mechanical fixes.
-        issues = post_issues(payload, SETA_VOICE, sources=sources, post_type=post_type) \
-            + experience_issues(payload, pillar, holiday)
+        issues = post_issues(payload, voice, sources=sources, post_type=post_type,
+                             recent_texts=recent_texts) \
+            + experience_issues(payload, pillar, holiday) \
+            + variation_issues(payload, self._variation)
         if issues:
             logger.warning(
                 "Seta post failed the quality gate (%s) - regenerating once",
@@ -179,11 +203,13 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             retry_payload = self._strip_urls(
                 self._parse_response(retry_raw), news_articles, post_type
             )
-            if len(post_issues(retry_payload, SETA_VOICE, sources=sources, post_type=post_type)
-                   + experience_issues(retry_payload, pillar, holiday)) < len(issues):
+            if len(post_issues(retry_payload, voice, sources=sources, post_type=post_type,
+                             recent_texts=recent_texts)
+                   + experience_issues(retry_payload, pillar, holiday)
+                   + variation_issues(retry_payload, self._variation)) < len(issues):
                 payload = retry_payload
 
-        payload = apply_fixes(payload, SETA_VOICE)
+        payload = apply_form_fixes(apply_fixes(payload, voice), self._variation)
 
         # ── CONFIDENTIALITY: THE ONE CHECK THAT BLOCKS ────────────────────────
         # Every other rule here reports and lets the post go; naming a
@@ -227,8 +253,9 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             )
             safe_payload = apply_fixes(
                 self._strip_urls(self._parse_response(safe_raw), news_articles, post_type),
-                SETA_VOICE,
+                voice,
             )
+            safe_payload = apply_form_fixes(safe_payload, self._variation)
             still = confidentiality_issues(
                 " ".join(str(safe_payload.get(k, "")) for k in ("headline", "body", "cta")),
                 public_context=public_context,
@@ -243,7 +270,9 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         # The decade of experience is part of what this pillar IS (user 2026-09-29): if the
         # model still left it out, say it in code rather than publish without it.
         payload = ensure_experience_mention(payload, pillar, holiday)
-        remaining = post_issues(payload, SETA_VOICE, sources=sources, post_type=post_type)
+        remaining = post_issues(payload, voice, sources=sources, post_type=post_type,
+                             recent_texts=recent_texts)
+        remaining = list(remaining) + variation_issues(payload, self._variation)
         # A story already told is not a new post. The URL exclusion above stops
         # the common case (the same article still ranking top a week later);
         # this catches the same story reached through a different article.
@@ -284,6 +313,9 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             hashtags = [tag.strip() for tag in hashtags.split() if tag.strip()]
 
         all_hashtags = self._merge_hashtags(list(hashtags), pillar)
+        if self._variation is not None and self._variation.max_hashtags:
+            # brand tag first, so the cut keeps it
+            all_hashtags = all_hashtags[:self._variation.max_hashtags]
 
         # MEDIA MUST MATCH THE POST (2026-09-13). This used to be
         # `pillar.image_prompt or payload.get(...)`, i.e. the fixed YAML prompt
@@ -327,6 +359,8 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             metadata["holiday_locale"] = holiday.locale
         if news_articles:
             metadata["news_sources_count"] = str(len(news_articles))
+        if self._variation is not None:
+            metadata.update(self._variation.as_metadata())
 
         return GeneratedPost(
             pillar_name=pillar.name,
@@ -383,7 +417,14 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         for name in ("body", "headline", "cta"):
             if name in payload and isinstance(payload[name], str):
                 cleaned = url_pattern.sub('', payload[name])
-                payload[name] = re.sub(r'\s{2,}', ' ', cleaned).strip()
+                # Horizontal whitespace only (2026-10-23). This was \s{2,}, which also
+                # collapsed the blank lines between paragraphs: every post reached the gate
+                # as one block, the retry was spent on "break it into paragraphs", and
+                # reflow_paragraphs then cut identical 3-sentence chunks - a large part of
+                # why every post looked the same.
+                cleaned = re.sub(r'[ \t]{2,}', ' ', cleaned)
+                cleaned = re.sub(r'[ \t]+\n', '\n', cleaned)
+                payload[name] = re.sub(r'\n{3,}', '\n\n', cleaned).strip()
         return payload
 
     def _build_prompt(
@@ -401,6 +442,8 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
         from .brand_store import extra_context
 
         brand_material = extra_context(self.brand_key)
+        variation = getattr(self, "_variation", None) if post_type != "holiday" else None
+        recent_ctas = getattr(self, "_recent_ctas", []) if post_type != "holiday" else []
         proof_points = "\n".join(f"- {item}" for item in pillar.proof_points) or "- Strategic M&A advisory\n- Cross-border expertise"
         ctas = ", ".join(pillar.ctas or ["Connect with our advisory team", "Request a strategic briefing"])
         hashtag_pool = " ".join(self._merge_hashtags([], pillar))
@@ -449,10 +492,15 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
                 f"{news_context}\n"
                 "\n"
                 "You MUST:\n"
-                "1. OPEN on ONE specific development from above — the actual companies, "
-                "sector and event. A post that opens on a theme ('cross-border M&A is "
-                "accelerating') instead of an event is a failed post.\n"
-                "2. Attribute it in the body by OUTLET NAME and DATE, exactly as given "
+                + ("1. OPEN on ONE specific development from above — the actual companies, "
+                   "sector and event. A post that opens on a theme ('cross-border M&A is "
+                   "accelerating') instead of an event is a failed post.\n"
+                   if variation is None or variation.choices.get("shape") == "event_read" else
+                   "1. BUILD the post on ONE specific development from above — the actual "
+                   "companies, sector and event — and name it within the first two "
+                   "paragraphs. The opening follows the FORM given below. A post about a "
+                   "theme with no event in it is a failed post.\n")
+                +                 "2. Attribute it in the body by OUTLET NAME and DATE, exactly as given "
                 "above (e.g. 'Nikkei Chinese reported on 9 September'). Never write "
                 "'recent reports', 'industry data' or any unnamed source.\n"
                 "3. Carry over at least one CONCRETE figure from the reporting — a "
@@ -577,7 +625,8 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             f"who it sells to and how it talks is described below - do not assume any "
             f"other industry, and never name a company other than {self.company}.\n"
             f"Strategy focus: {self.strategy_text}\n\n"
-            f"IMPORTANT DATE CONTEXT: Today is {current_date}. The current year is {current_year}.\n"
+            + (variation.prompt_block() + "\n" if variation is not None else "")
+            +             f"IMPORTANT DATE CONTEXT: Today is {current_date}. The current year is {current_year}.\n"
             f"- Only reference news, data, and reports from the last 6 months ({current_year} or late {current_year - 1})\n"
             f"- If you must reference older data, you MUST add context like: 'While this {current_year - 2} data shows X, current trends suggest...'\n"
             f"- NEVER present old data as current without acknowledging the date\n"
@@ -607,17 +656,29 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             "- The post has TWO parts: (1) the BODY and (2) a single final paragraph in the 'cta' field.\n"
             "- BODY = authoritative, expert analysis in a thought-leadership voice. It must NOT mention "
             f"{self.company}, 'our firm', 'we', or any first-person brand reference. Pure insight only.\n"
-            "- BODY FORMATTING: 3-4 SHORT paragraphs separated by a blank line, each at most 3 sentences "
-            "and under 60 words. Never one long block - LinkedIn hides everything after the first two "
-            "lines behind 'see more', so the opening sentence must stand alone as a hook.\n"
+            + ("- BODY FORMATTING: 3-4 SHORT paragraphs separated by a blank line, each at most 3 sentences "
+               "and under 60 words. Never one long block - LinkedIn hides everything after the first two "
+               "lines behind 'see more', so the opening sentence must stand alone as a hook.\n"
+               if variation is None else
+               "- BODY FORMATTING: short paragraphs separated by a blank line, each at most 3 sentences "
+               "and under 60 words, in the SHAPE given below. Never one long block - LinkedIn hides "
+               "everything after the first two lines behind 'see more'.\n")
             + ("- cta MUST open by saying that Seta Capital has observed this pattern over MORE THAN A "
-               "DECADE of Europe-China mandates - in your own words each time (e.g. 'Across more than a "
-               "decade of Europe-China mandates, Seta Capital has seen...'). Never give a number of deals.\n"
+               "DECADE of Europe-China mandates - in your own words each time. Do NOT open the paragraph "
+               "with 'Over/Across more than a decade of Europe-China mandates': that exact clause closed "
+               "every post in October 2026 and readers now skip it. Work the decade into a sentence about "
+               "THIS subject instead. Never give a number of deals.\n"
                if getattr(pillar, "require_experience_mention", False) and not holiday else "")
-            + "- cta = EXACTLY ONE short paragraph that ENDS WITH A GENUINE OPEN QUESTION to the reader - "
-            "a real question a practitioner would want to answer from experience, specific to this post's "
-            "subject. Never a rhetorical or yes/no question, and never the same question twice.\n"
-            "Constraints:\n"
+            + ("- cta = EXACTLY ONE short paragraph that ENDS WITH A GENUINE OPEN QUESTION to the reader - "
+               "a real question a practitioner would want to answer from experience, specific to this post's "
+               "subject. Never a rhetorical or yes/no question, and never the same question twice.\n"
+               if variation is None or variation.requires_closing_question else
+               "- cta = EXACTLY ONE short paragraph that ENDS ON A CLEAR TAKEAWAY SENTENCE - what the "
+               "reader should do or watch next. It must NOT end with a question.\n")
+            + ("- Do not reuse the wording of these recent closing paragraphs:\n"
+               + "\n".join(f"  * {c[:220]}" for c in recent_ctas) + "\n"
+               if recent_ctas else "")
+            +             "Constraints:\n"
             "- This post must be worth resharing from a personal profile. It is an insight, NOT an "
             "advertisement. Write nothing a reader could call promotional.\n"
             "- FORBIDDEN anywhere in the post: 'specializes in', 'connect with us', 'contact us', "
@@ -626,9 +687,10 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             "'request a briefing'. Do not sell, do not offer services, do not invite enquiries.\n"
             f"- {self.company} may be named AT MOST ONCE, in the cta paragraph only, as a plain "
             "attribution of viewpoint - never as a pitch, and never in headline or body.\n"
-            "- Keep total length 150-250 words across headline + body + cta.\n"
-            "- Open with an attention-grabbing hook that feels timely and relevant.\n"
-            "- Use professional, analytical language appropriate for C-suite readers.\n"
+            + ("- Keep total length 150-250 words across headline + body + cta.\n"
+               "- Open with an attention-grabbing hook that feels timely and relevant.\n"
+               if variation is None else "")
+            +             "- Use professional, analytical language appropriate for C-suite readers.\n"
             "- HEADLINE: do NOT use the worn-out house vocabulary - avoid 'cross-border', 'navigating', "
             "'unlocking', 'precision', 'reshaping' and 'strategic value'. Lead with the specific claim, "
             "number or tension of THIS post so it does not read like every previous one.\n"
@@ -640,10 +702,12 @@ class SetaLinkedInPostGenerator(BaseContentGenerator):
             "make it qualitatively; readers here are M&A professionals who will check.\n"
             "- WRITE CONCRETELY. Banned as padding: strategic, complex, dynamic, landscape, evolving, robust, leverage, nuanced, intricate, crucial, comprehensive, seamless, cutting-edge, unparalleled, paramount, holistic, value-add. Across this page's archive every post averaged 5 such words per 100 - which is why they all read the same. Name the country, the sector, the component, the situation. A sentence that would still be true for a different company in a different industry is padding: cut it.\n"
             "- NEVER include political commentary or negative remarks about any country.\n"
-            "- Finish with 2-3 hashtags from this pool (the post carries at most 4 in total): "
-            f"{hashtag_pool}.\n"
+            + ("- Finish with 2-3 hashtags from this pool (the post carries at most 4 in total): "
+               if variation is None else "- Pick the hashtags from this pool: ")
+            + f"{hashtag_pool}.\n"
             f"{image_requirements}\n"
             "- Provide alt_text suitable for LinkedIn accessibility, 15-25 words.\n"
+            + ("\n" + variation.prompt_block() if variation is not None else "")
             + (
                 "\nYour previous attempt was REJECTED for these reasons - fix every one:\n"
                 + "\n".join(f"- {issue}" for issue in quality_feedback)

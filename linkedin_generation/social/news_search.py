@@ -1201,8 +1201,13 @@ def recent_post_history(posts_dir, days: int = 45) -> dict:
             urls.add(_norm_url(m.group(0)))
         if data.get("headline"):
             headlines.append(str(data["headline"]))
-            posts.append({"headline": str(data["headline"]),
-                          "body": str(data.get("body", "") or "")})
+            entry = {"headline": str(data["headline"]),
+                     "body": str(data.get("body", "") or ""),
+                     "cta": str(data.get("cta", "") or "")}
+            # the form each post was given (social/variation.py), so the next draw
+            # can avoid repeating it
+            entry.update({k: str(v) for k, v in data.items() if k.startswith("variation_")})
+            posts.append(entry)
     return {"urls": urls, "headlines": headlines, "posts": posts}
 
 
