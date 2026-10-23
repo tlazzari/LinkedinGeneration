@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 from commonlib.llm_clients import QuotaExceededError, create_llm_client
 from linkedin_generation.social.variation import choose as choose_variation
+from linkedin_generation.social.max_plan_client import wrap_for_brand
 from linkedin_generation.social import CampaignConfig, PostPillar
 from linkedin_generation.social.seta_content_generation import SetaLinkedInPostGenerator, GeneratedPost
 from linkedin_generation.social.linkedin_client import LinkedInPublisher, LinkedInPublisherConfig
@@ -978,6 +979,10 @@ def main() -> None:
 
     # Create LLM client
     llm_client = create_llm_client(provider=args.llm_provider, model=args.llm_model)
+    # Seta's post text is written by Claude on Tom's Max subscription (Tom 2026-10-23);
+    # the client above stays as the fallback. Never for a Bolla tenant - see max_plan_client.
+    llm_client = wrap_for_brand(brand_key, llm_client,
+                                enabled=os.getenv("SOCIAL_MAX_PLAN", "1") != "0")
 
     # Create generator
     generator_cls = brand.generator

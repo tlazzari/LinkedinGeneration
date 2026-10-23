@@ -117,6 +117,23 @@ OWN_NAMES = (
 )
 
 
+# The vocabulary of the firm's own trade. An entry in the deal record that is
+# EXACTLY one of these is an extraction artefact, never a name to protect: on
+# 2026-10-23 the KB stored a counterparty literally called "Cross Border", which
+# blocked any post saying "cross border". Exact match only (spaces/hyphens
+# normalised) - "Cross Border Srl" is a real company and stays enforced. Add a
+# phrase here only if a Europe-China M&A post cannot avoid it.
+DOMAIN_PHRASES = frozenset({
+    "cross border", "joint venture", "private equity", "due diligence",
+    "family business", "family office", "deal flow", "supply chain",
+    "investment banking", "corporate finance", "mergers and acquisitions",
+})
+
+
+def _is_domain_phrase(name: str) -> bool:
+    return " ".join(name.lower().replace("-", " ").split()) in DOMAIN_PHRASES
+
+
 # The Chinese names a counterparty is printed under in the Chinese press.
 # WHY (2026-10-20): the "already public" waiver compared the ENGLISH name in the
 # post with the article text. Seta's news is searched in Chinese first, so the
@@ -166,6 +183,28 @@ def _dictionary_words() -> frozenset:
         except OSError:
             continue
     return frozenset(words)
+
+
+def _is_generic_deal_phrase(name: str) -> bool:
+    """A DEAL NAME that is ordinary lowercase prose, not a name (2026-10-23).
+
+    The KB's deal extraction stores whatever the mail called the deal, so
+    seta_kb_deal.deal_name holds "the deal", "the acquisition", "add on",
+    "acquisition add on under evaluation". As counterparty names those blocked any
+    post containing "the deal" - found on the 23 Oct A/B run, where a Seta draft was
+    refused for "names a counterparty from the deal record: 'the deal'".
+
+    Skipped only when NO token after the first is capitalised and EVERY token is a
+    dictionary word. "Adler Plastic", "One Magnet", "The Deal Company" (capitalised -
+    how names are written) and "Acqua Pejo" (not dictionary words) stay enforced.
+    """
+    tokens = [t for t in re.split(r"[\s/&,()]+", name.strip()) if t]
+    if not tokens:
+        return False
+    if any(t[:1].isupper() for t in tokens[1:]):
+        return False
+    words = _dictionary_words()
+    return bool(words) and all(t.lower().strip(".-'\"") in words for t in tokens)
 
 
 def _is_ordinary_word(name: str) -> bool:
@@ -230,6 +269,8 @@ def _known_names() -> Dict[str, List[str]]:
             for line in out.stdout.splitlines():
                 name = line.strip()
                 if not name or name.upper() == "NULL" or name.lower() in sectors:
+                    continue
+                if table == "seta_kb_deal" and _is_generic_deal_phrase(name):
                     continue
                 # A company-shaped display name goes to the ORG gate whatever
                 # table it came from -- see _looks_like_company.
@@ -298,6 +339,8 @@ def confidentiality_issues(text: str, public_context: str = "") -> List[str]:
         if len(org) < 4 or _is_public(org):
             continue
         if any(o.lower() == org.lower() for o in OWN_NAMES):
+            continue
+        if _is_domain_phrase(org):
             continue
         if _is_already_public(org):
             continue
@@ -414,6 +457,7 @@ def is_publishable(text: str, public_context: str = "") -> bool:
 
 __all__ = [
     "OWN_NAMES",
+    "DOMAIN_PHRASES",
     "PUBLIC_DEALS",
     "CONFIDENTIAL_CLAIMS",
     "confidentiality_issues",

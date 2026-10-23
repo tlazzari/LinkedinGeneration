@@ -23,10 +23,11 @@ schedule:
     time: '10:00'
   - day: Thursday
     time: '10:00'
-# The source links used to go out as the page's own first comment (2026-09-13). Off
-# 2026-10-23: it was the only comment Seta posts ever got - LinkedIn sees a page talking to
-# itself. The outlet and date stay named in the body; the URLs stay in the artefacts.
-source_comment: false
+# The source links go out as the page's own first comment (2026-09-13), never in the body.
+# Briefly switched off on 2026-10-23 and put back the same day (Tom): the reach effect of a
+# self-comment is unproven either way, while a checkable source is worth having for an M&A
+# audience.
+source_comment: true
 # Each post's FORM (shape, opening, length, ending, hashtag count) is drawn at random,
 # demoting what the last 3 posts used - social/variation.py (Tom 2026-10-23). Defaults
 # live in the code; tune weights here, 0 switches an option off. The rules never vary.

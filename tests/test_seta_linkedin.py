@@ -2625,7 +2625,8 @@ with _tempfile.TemporaryDirectory() as _td:
 
 _sy3 = load_seta_campaign()
 t.check('RULE: Seta posts once a week (Tom 2026-10-23)', (_sy3.get('schedule') or {}).get('posts_per_week') == 1)
-t.check('RULE: Seta does not comment on its own posts (Tom 2026-10-23)', _sy3.get('source_comment') is False)
+t.check('RULE: Seta source links go in the first comment (switched off and back on, Tom 2026-10-23)',
+        _sy3.get('source_comment') is True)
 t.check('RULE: Seta post form is varied', (_sy3.get('variation') or {}).get('enabled') is True)
 _sched_src = (PKG_DIR / 'seta_post_scheduler.py').read_text()
 t.check('WIRING: the scheduler draws a form and passes it to the generator',
@@ -2654,5 +2655,56 @@ _g._variation = None; _g._recent_ctas = []
 _pr0 = _g._build_prompt(pillar=_tl, post_type='technical', image_mode='photo')
 t.check('PROMPT: without a form the previous structure is unchanged',
         '3-4 SHORT paragraphs' in _pr0 and 'ENDS WITH A GENUINE OPEN QUESTION' in _pr0)
+
+# ============================================================================
+# MAX PLAN (Tom 2026-10-23: "use max subscription for the posts"). Seta's text is
+# written by Claude via claude_chain ('max' only); the brand's normal client is the
+# fallback. Never a Bolla tenant.
+# ============================================================================
+import types as _types
+from linkedin_generation.social import max_plan_client as _mpc
+class _FB:
+    label = 'fallback'
+    def __init__(self): self.calls = 0
+    def complete(self, prompt, **kw):
+        self.calls += 1
+        return '{"fallback": true}'
+t.check('MAXPLAN: Seta is wrapped', isinstance(_mpc.wrap_for_brand('seta', _FB()), _mpc.MaxPlanClient))
+t.check('MAXPLAN: a Bolla tenant is NEVER wrapped (the subscription is Tom\'s own)',
+        not isinstance(_mpc.wrap_for_brand('t10105_eratrend', _FB()), _mpc.MaxPlanClient))
+t.check('MAXPLAN: SOCIAL_MAX_PLAN=0 switches it off', not isinstance(_mpc.wrap_for_brand('seta', _FB(), enabled=False), _mpc.MaxPlanClient))
+_real_chain = sys.modules.get('claude_chain')
+try:
+    sys.modules['claude_chain'] = _types.SimpleNamespace(complete=lambda *a, **k: ('', ''))
+    _fb = _FB(); _out = _mpc.MaxPlanClient(fallback=_fb).complete('p', max_tokens=800)
+    t.check('MAXPLAN: a Max-plan failure falls back - never costs a post', _fb.calls == 1 and 'fallback' in _out)
+    _seen = {}
+    def _ok(prompt, **k):
+        _seen.update(k); return ('{"headline": "x"}', 'max')
+    sys.modules['claude_chain'] = _types.SimpleNamespace(complete=_ok)
+    _fb = _FB(); _out = _mpc.MaxPlanClient(fallback=_fb).complete('p', max_tokens=800)
+    t.check('MAXPLAN: on success the fallback is not called', _fb.calls == 0 and '"headline"' in _out)
+    t.check('MAXPLAN: only the Max plan is tried (no paid API from this route)', _seen.get('order') == ('max',), _seen.get('order'))
+finally:
+    if _real_chain is not None:
+        sys.modules['claude_chain'] = _real_chain
+    else:
+        sys.modules.pop('claude_chain', None)
+t.check('WIRING: the scheduler wraps the client for the brand',
+        'wrap_for_brand(brand_key, llm_client' in (PKG_DIR / 'seta_post_scheduler.py').read_text())
+
+# 2026-10-23: KB deal names that are plain prose ("the deal", "the acquisition", "add on")
+# blocked any post containing those words.
+from linkedin_generation.social.confidentiality import _is_generic_deal_phrase as _gdp
+t.check('CONF: "the deal" / "the acquisition" / "add on" are prose, not names',
+        all(_gdp(n) for n in ('the deal', 'the acquisition', 'add on', 'acquisition add on under evaluation')))
+t.check('CONF: capitalised or non-dictionary deal names stay enforced',
+        not any(_gdp(n) for n in ('Adler Plastic', 'One Magnet', 'Acqua Pejo', 'A.Z. Due', 'The Deal Company')))
+t.check('CONF: a post saying "the deal" and "the acquisition" is not blocked',
+        not confidentiality_issues('The deal values the brand at a premium. The acquisition gives the buyer dealers.'))
+
+from linkedin_generation.social.confidentiality import _is_domain_phrase as _idp
+t.check('CONF: a deal-record entry that is just "Cross Border" does not block the phrase',
+        _idp('Cross Border') and _idp('cross-border') and not _idp('Cross Border Srl'))
 
 sys.exit(t.summary())
