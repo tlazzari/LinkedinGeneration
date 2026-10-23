@@ -5,7 +5,7 @@
 | When (UTC) | Cron line | What |
 |---|---|---|
 | Daily 07:00 | `0 7 * * * cd /opt/linkedin && . .env && bin/run_daily_tnt.sh --publish >> logs/tnt.log 2>&1` | TNT Motion daily post |
-| Daily 06:00 | `0 6 * * * cd /opt/linkedin && . .env && bin/run_daily_seta.sh --publish >> logs/seta.log 2>&1` | Seta Capital — the SCRIPT decides whether to post (day/pillar/holiday logic lives in code, not in the cron day-field) |
+| Daily 06:00 | `0 6 * * * cd /opt/linkedin && . .env && bin/run_daily_seta.sh --publish >> logs/seta.log 2>&1` | Seta Capital — the SCRIPT decides whether to post (day/pillar/holiday logic lives in code, not in the cron day-field). Since 2026-10-23: **one post a week** on a day drawn among Tue/Wed/Thu (`schedule.posts_per_week` in config/seta_capital_linkedin.yaml), plus holiday greetings |
 | Weekly Sun 05:00 | `0 5 * * 0 bash /opt/linkedin/bin/refresh_seta_token.sh >> /opt/linkedin/logs/seta_token_refresh.log 2>&1` | Seta LinkedIn token refresh (if expiry < 12 days) |
 | Yearly Dec 1 03:00 | `0 3 1 12 * cd /opt/linkedin && . .env && bin/update_holiday_calendars.sh >> logs/holiday.log 2>&1` | Refresh holiday JSON calendars (Nager.Date) for next year |
 
