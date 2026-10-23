@@ -1374,6 +1374,9 @@ def post_issues(
     if len(paragraphs) < 2:
         issues.append("body is a single block - break it into 3-4 short paragraphs")
     for paragraph in paragraphs:
+        # a numbered/bulleted list is one block by design - its items are the units
+        if _LIST_LINE.search(paragraph):
+            continue
         if len(paragraph.split()) > MAX_BODY_WORDS_PER_PARAGRAPH:
             issues.append(
                 f"a paragraph runs {len(paragraph.split())} words - keep each under "
@@ -1405,12 +1408,21 @@ def post_issues(
     return issues
 
 
+_LIST_LINE = re.compile(r"(?m)^\s*(?:\d{1,2}[.)]|[-•*])\s+\S")
+
+
 def reflow_paragraphs(body: str) -> str:
     """Break a wall of text into paragraphs of at most three sentences."""
     if not body.strip():
         return body
     out: List[str] = []
     for block in [p.strip() for p in body.split("\n\n") if p.strip()]:
+        # A numbered list is left exactly as written (2026-10-23). The splitter read
+        # "2." as a sentence end, so "1. ... 2. Thread runout ..." came out as "2." alone
+        # on a line, and the " ".join below flattened the list's own line breaks.
+        if _LIST_LINE.search(block):
+            out.append(block)
+            continue
         sentences = [s.strip() for s in _SENTENCE_SPLIT.split(block) if s.strip()]
         for start in range(0, len(sentences), MAX_PARAGRAPH_SENTENCES):
             out.append(" ".join(sentences[start : start + MAX_PARAGRAPH_SENTENCES]))

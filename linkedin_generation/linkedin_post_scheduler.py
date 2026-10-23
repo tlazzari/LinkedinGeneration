@@ -21,6 +21,7 @@ from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
 from commonlib.llm_clients import QuotaExceededError, create_llm_client
+from linkedin_generation.social.max_plan_client import wrap_for_brand
 from linkedin_generation.social import (
     CampaignConfig,
     LinkedInPostGenerator,
@@ -860,6 +861,10 @@ def main() -> None:
     strategy_text = load_strategy(args.strategy_file, args.strategy_text)
 
     llm_client = create_llm_client(provider=args.llm_provider, model=args.llm_model)
+    # TNT's post text is written by Claude on Tom's Max subscription too (Tom 2026-10-23,
+    # "move tnt too"); the client above stays as the fallback. See max_plan_client.
+    llm_client = wrap_for_brand("tnt", llm_client,
+                                enabled=os.getenv("SOCIAL_MAX_PLAN", "1") != "0")
     generator = LinkedInPostGenerator(
         campaign=campaign,
         llm_client=llm_client,

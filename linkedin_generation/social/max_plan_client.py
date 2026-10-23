@@ -25,7 +25,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-MAX_PLAN_BRANDS = frozenset({"seta"})
+# Seta 2026-10-23, TNT the same day ("move tnt too").
+MAX_PLAN_BRANDS = frozenset({"seta", "tnt"})
 MAX_PLAN_MODEL = "claude-opus-5-5"
 SYSTEM = ("You write LinkedIn posts for a company page. Follow every instruction in the "
           "request exactly and return only the JSON document it asks for - no preface, "

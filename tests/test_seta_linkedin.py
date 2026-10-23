@@ -2669,7 +2669,10 @@ class _FB:
     def complete(self, prompt, **kw):
         self.calls += 1
         return '{"fallback": true}'
-t.check('MAXPLAN: Seta is wrapped', isinstance(_mpc.wrap_for_brand('seta', _FB()), _mpc.MaxPlanClient))
+t.check('MAXPLAN: Seta and TNT are wrapped (Tom 2026-10-23)', isinstance(_mpc.wrap_for_brand('seta', _FB()), _mpc.MaxPlanClient)
+        and isinstance(_mpc.wrap_for_brand('tnt', _FB()), _mpc.MaxPlanClient))
+t.check('WIRING: the TNT scheduler wraps its client too',
+        'wrap_for_brand("tnt", llm_client' in (PKG_DIR / 'linkedin_post_scheduler.py').read_text())
 t.check('MAXPLAN: a Bolla tenant is NEVER wrapped (the subscription is Tom\'s own)',
         not isinstance(_mpc.wrap_for_brand('t10105_eratrend', _FB()), _mpc.MaxPlanClient))
 t.check('MAXPLAN: SOCIAL_MAX_PLAN=0 switches it off', not isinstance(_mpc.wrap_for_brand('seta', _FB(), enabled=False), _mpc.MaxPlanClient))
@@ -2706,5 +2709,13 @@ t.check('CONF: a post saying "the deal" and "the acquisition" is not blocked',
 from linkedin_generation.social.confidentiality import _is_domain_phrase as _idp
 t.check('CONF: a deal-record entry that is just "Cross Border" does not block the phrase',
         _idp('Cross Border') and _idp('cross-border') and not _idp('Cross Border Srl'))
+
+from linkedin_generation.social.post_quality import reflow_paragraphs as _rfp
+_lst = "Shop-floor check:\n1. Match the standard.\n2. Thread runout must be 0.005 mm or less.\n3. Hardness HRC 58.\n4. Fretting means slip."
+t.check('REFLOW: a numbered list is kept intact (was cut into "2." alone on a line)', _rfp(_lst) == _lst, repr(_rfp(_lst)))
+_pt = "2. German owners sell. Buyers check dealers. Contracts decide value. Plan early."
+t.check('REFLOW: a long numbered point keeps its marker with its text', _rfp(_pt).startswith("2. German"), repr(_rfp(_pt)))
+_wall = "One. Two. Three. Four. Five."
+t.check('REFLOW: an ordinary wall of text is still split', _rfp(_wall).count("\n\n") == 1, repr(_rfp(_wall)))
 
 sys.exit(t.summary())
