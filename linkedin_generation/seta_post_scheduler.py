@@ -29,7 +29,6 @@ from linkedin_generation.social.image_providers import (
     ImagePayload,
     ImageProviderConfig,
     GoogleImagenProvider,
-    ReplicateVideoProvider,
     AlibabaVideoProvider,
     create_image_provider,
 )
@@ -303,12 +302,12 @@ def generate_video_for_post(
     post: GeneratedPost,
     pillar,
     target_dir: Path,
-) -> Optional[Path]:
-    """Generate a Veo 2 video for pillars with use_veo=True.
+) -> Path:
+    """Generate the clip for pillars with use_veo=True (flag name kept for config compatibility).
 
-    Tries Replicate (Veo 2) first, then Google Veo REST, returns None on full failure
-    so the caller can fall back to a static Imagen image.
-    16:9 aspect ratio is the only one Veo accepts.
+    2026-11-10 (Tom: "set up happy horse"): Alibaba HappyHorse is the ONLY paid video provider (monthly Token Plan for now - Tom 10/11; PAYG once his identity is verified).
+    Google Veo (~EUR 2.85/clip, model 404 since 05/11) and the never-configured Replicate step were removed.
+    Raises on any failure, with the reason, so the caller falls back to the animated image AND tells Tom.
     """
     # post.video_prompt FIRST (2026-09-13). It is composed in the generator from
     # this post's own subject and already carries the house rules appended in
@@ -318,38 +317,30 @@ def generate_video_for_post(
         f"Cinematic 16:9 professional footage evoking {pillar.angle.lower()[:80]}. "
         "Atmospheric, documentary style, warm professional colour grade."
     )
+    video_path = AlibabaVideoProvider().get_video(prompt=video_prompt, target_dir=target_dir)
+    logging.info("HappyHorse video generated: %s - %s", video_path, AlibabaVideoProvider.cost_estimate())
+    return video_path
 
-    replicate_token = os.getenv("REPLICATE_API_TOKEN")
-    if replicate_token:
-        try:
-            provider = ReplicateVideoProvider(campaign.image_provider)
-            video_path = provider.get_video(prompt=video_prompt, target_dir=target_dir)
-            logging.info("Veo 2 (Replicate) video generated: %s", video_path)
-            return video_path
-        except Exception as exc:
-            logging.warning("Replicate Veo 2 failed, trying Google Veo REST: %s", exc)
 
+def notify_tom_video_fallback(pillar_name: str, reason: str) -> bool:
+    """One line to Tom when a video post falls back to the animated image (2026-11-10: no silent fallbacks -
+    from 05/11 every Seta video post had quietly become a GIF). Goes through the shared internal queue
+    (/opt/scripts/tnt_mailer.queue_mail -> Tom's daily digest), run with the system python because the LinkedIn venv
+    has no pymysql. Never raises."""
+    import subprocess
+    line = f"Seta LinkedIn: the '{pillar_name}' post went out as an animated image, not a video - {reason[:300]}"
+    code = ("import sys; sys.path.insert(0, '/opt/scripts'); from tnt_mailer import queue_mail; "
+            "import html; ok = queue_mail('seta_linkedin', 'Seta LinkedIn', sys.argv[1], "
+            "'<p>' + html.escape(sys.argv[1]) + '</p>'); sys.exit(0 if ok else 1)")
     try:
-        provider_cfg = ImageProviderConfig(
-            provider="google",
-            model="veo-3.1-generate-preview",
-            size="1920x1080",
-        )
-        google_provider = GoogleImagenProvider(provider_cfg)
-        video_path = google_provider.get_video(prompt=video_prompt, target_dir=target_dir)
-        logging.info("Google Veo video generated: %s", video_path)
-        return video_path
+        r = subprocess.run(["/usr/bin/python3", "-c", code, line], timeout=30, capture_output=True)
+        if r.returncode == 0:
+            logging.info("Tom told: %s", line)
+            return True
+        logging.error("Could not queue the video-fallback note for Tom: %s", r.stderr[-300:])
     except Exception as exc:
-        logging.warning("Google Veo also failed, trying Alibaba HappyHorse: %s", exc)
-
-    try:
-        video_path = AlibabaVideoProvider().get_video(prompt=video_prompt, target_dir=target_dir)
-        logging.info("Alibaba HappyHorse video generated: %s", video_path)
-        return video_path
-    except Exception as exc:
-        logging.warning("Alibaba video also failed — falling back to static image: %s", exc)
-
-    return None
+        logging.error("Could not queue the video-fallback note for Tom: %s", exc)
+    return False
 
 
 def ensure_local_image_file(
@@ -501,7 +492,8 @@ def run_single_generation(
         )
 
     elif pillar.use_veo:
-        logging.info("Pillar '%s' uses Veo — attempting video generation", pillar.name)
+        logging.info("Pillar '%s' uses video - attempting HappyHorse generation", pillar.name)
+        video_failure = ""
         try:
             video_path = generate_video_for_post(
                 campaign=campaign,
@@ -510,14 +502,17 @@ def run_single_generation(
                 target_dir=videos_dir,
             )
         except Exception as e:
-            logging.error("Video generation raised unexpectedly: %s", e)
+            video_failure = str(e) or type(e).__name__
+            logging.error("Video generation failed: %s", video_failure)
+            video_path = None
 
         if video_path is None:
-            # Veo failed — fall back to Imagen static image so the post still goes out
+            # Video failed - fall back to Imagen animated image so the post still goes out, and tell Tom
             logging.warning(
-                "Veo generation failed for pillar '%s' — falling back to Imagen image.",
+                "Veo generation failed for pillar '%s' - falling back to Imagen image.",
                 pillar.name,
             )
+            notify_tom_video_fallback(pillar.name, video_failure or "no video returned")
             try:
                 image_payload = generate_image_for_post(
                     campaign=campaign,
@@ -525,7 +520,7 @@ def run_single_generation(
                     target_dir=images_dir,
                 )
             except Exception as _img_err:
-                logging.error("Imagen fallback also failed for '%s': %s — skipping.", pillar.name, _img_err)
+                logging.error("Imagen fallback also failed for '%s': %s - skipping.", pillar.name, _img_err)
                 return
 
     else:

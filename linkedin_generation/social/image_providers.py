@@ -558,21 +558,61 @@ class GoogleImagenProvider:
             raise RuntimeError(f"Failed to download Veo video from {url}") from exc
 
 
-class AlibabaVideoProvider:
-    """HappyHorse text-to-video on the Alibaba Token Plan (already paid for; Veo fallback).
+class VideoKeyMissing(RuntimeError):
+    """The key of the selected Alibaba account is not configured - no video call is attempted."""
 
-    Async job: submit, poll /tasks/{id}, download the mp4. 1080p 16:9, ~100 s per 5 s clip.
+
+class AlibabaVideoProvider:
+    """HappyHorse text-to-video on Alibaba Model Studio (international, Singapore).
+
+    2026-11-10 (Tom: "set up happy horse"): the ONLY paid video provider for Seta. Google Veo was removed - it
+    cost ~EUR 2.85 per clip (54% of the Gemini bill over 90 days) and veo-3.1-generate-preview 404s since 05/11;
+    Replicate was never configured.
+
+    Two accounts, picked by SETA_VIDEO_ACCOUNT:
+    - "token_plan" (DEFAULT for now) = the monthly Token Plan, ALIBABA_TOKEN_PLAN_KEY. Tom 2026-11-10: "i cannot use
+      happyhorse untill the identiny is not veryifes please use the monthly account for the time being, we will
+      change it later". Renewed 10/11; happyhorse-1.1-t2v verified live on it the same day. Its terms say
+      interactive use only - Tom accepted that risk; keep it to the weekly Seta video.
+    - "payg" = pay-as-you-go DASHSCOPE_API_KEY, once Tom's identity is verified. Switch = SETA_VIDEO_ACCOUNT=payg.
+
+    Async job: submit, poll /tasks/{id}, download the mp4. 1080p 16:9 5 s (the model's defaults, verified 04/10).
     """
 
-    BASE = "https://token-plan.ap-southeast-1.maas.aliyuncs.com"
+    ACCOUNTS = {
+        "token_plan": ("https://token-plan.ap-southeast-1.maas.aliyuncs.com", "ALIBABA_TOKEN_PLAN_KEY"),
+        "payg": ("https://dashscope-intl.aliyuncs.com", "DASHSCOPE_API_KEY"),
+    }
+    DEFAULT_ACCOUNT = "token_plan"
     MODEL = "happyhorse-1.1-t2v"
+    CLIP_SECONDS = 5
+    RESOLUTION = "1080p"
+    # PAYG list price used only for the cost line in the log (~CNY 1.6/s at 1080p per secondary sources,
+    # 2026-11-10 - check the console bill; failed generations are not billed). On the Token Plan it uses credits.
+    RATE_CNY_PER_S = 1.6
+
+    @classmethod
+    def account(cls) -> str:
+        acc = (os.getenv("SETA_VIDEO_ACCOUNT") or cls.DEFAULT_ACCOUNT).strip().lower()
+        if acc not in cls.ACCOUNTS:
+            raise ValueError(f"SETA_VIDEO_ACCOUNT={acc!r} - use one of {sorted(cls.ACCOUNTS)}")
+        return acc
 
     def __init__(self, config: ImageProviderConfig | None = None) -> None:
-        key = os.getenv("ALIBABA_TOKEN_PLAN_KEY")
+        self.ACCOUNT = self.account()
+        self.BASE, key_env = self.ACCOUNTS[self.ACCOUNT]
+        key = os.getenv(key_env)
         if not key:
-            raise RuntimeError("ALIBABA_TOKEN_PLAN_KEY must be set for the Alibaba video provider")
+            raise VideoKeyMissing(f"{key_env} is not set ({self.ACCOUNT} account) - no video generated")
         self._headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
         self.config = config
+
+    @classmethod
+    def cost_estimate(cls) -> str:
+        if cls.account() == "token_plan":
+            return f"monthly Token Plan credits ({cls.CLIP_SECONDS} s {cls.RESOLUTION}; no per-clip charge)"
+        return (f"est. cost CNY {cls.CLIP_SECONDS * cls.RATE_CNY_PER_S:.2f} "
+                f"({cls.CLIP_SECONDS} s x CNY {cls.RATE_CNY_PER_S}/s {cls.RESOLUTION})")
 
     def get_video(self, *, prompt: str, target_dir: Path) -> Path:
         import requests
@@ -588,7 +628,7 @@ class AlibabaVideoProvider:
             headers={**self._headers, "X-DashScope-Async": "enable"}, json=body, timeout=60,
         )
         if not r.ok:
-            raise RuntimeError(f"Alibaba video submit failed ({r.status_code}): {r.text[:300]}")
+            raise RuntimeError(f"HappyHorse submit failed ({r.status_code}): {r.text[:300]}")
         task_id = r.json()["output"]["task_id"]
         deadline = time.time() + 600
         while time.time() < deadline:
@@ -604,8 +644,8 @@ class AlibabaVideoProvider:
                 path.write_bytes(video.content)
                 return path
             if status in ("FAILED", "CANCELED", "UNKNOWN"):
-                raise RuntimeError(f"Alibaba video task {status}: {out.get('message') or out}")
-        raise RuntimeError("Alibaba video task timed out after 600s")
+                raise RuntimeError(f"HappyHorse task {status}: {out.get('message') or out}")
+        raise RuntimeError("HappyHorse task timed out after 600s")
 
 
 class CuratedLibraryImageProvider:

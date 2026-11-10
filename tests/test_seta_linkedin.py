@@ -47,8 +47,11 @@ t.check('news preview wired in',                'fetch_article_preview_image' in
 # === RULE: Veo video generation must be wired ===
 t.check('RULE: generate_video_for_post function present',
         'def generate_video_for_post' in src)
-t.check('RULE: ReplicateVideoProvider imported in scheduler',
-        'ReplicateVideoProvider' in src)
+# 2026-11-10 (Tom: "set up happy horse"): HappyHorse is the ONLY paid video provider (monthly Token Plan for now, PAYG later); Veo + Replicate removed
+t.check('RULE: AlibabaVideoProvider (HappyHorse) is the video provider',
+        'AlibabaVideoProvider' in src)
+t.check('RULE: no Google Veo / Replicate video step in the Seta scheduler',
+        'ReplicateVideoProvider' not in src and 'veo-3.1' not in src)
 t.check('RULE: scheduler calls generate_video_for_post when pillar.use_veo',
         'pillar.use_veo' in src and 'generate_video_for_post' in src)
 t.check('RULE: scheduler calls publish_video_post for video path',
@@ -279,12 +282,14 @@ t.check('RULE: Seta image_provider uses animated GIF (use_animated_gif: true)',
 t.check('RULE: Seta GIF has at least 4 frames',
         (campaign.get('image_provider', {}).get('gif_num_frames') or 0) >= 4)
 
-# === RULE: Veo failure falls back to Imagen (veo-1.5-001 is dead, veo-2 needs billing) ===
+# === RULE: video failure falls back to the animated Imagen GIF AND Tom is told (2026-11-10: no silent fallbacks) ===
 sched_src = (PKG_DIR / 'seta_post_scheduler.py').read_text()
 t.check('RULE: Veo failure skips post (no static fallback)',
         'elif pillar.use_veo:' in sched_src and 'Veo generation failed' in sched_src)
 t.check('RULE: Veo fallback uses Imagen instead of skipping post',
         'falling back to Imagen' in sched_src and 'generate_image_for_post' in sched_src)
+t.check('RULE: a video fallback is reported to Tom (notify_tom_video_fallback)',
+        'notify_tom_video_fallback(' in sched_src)
 t.check('RULE: non-Veo pillars still generate animated GIF image',
         '# Non-Veo pillar' in sched_src or 'Industry Expertise' in sched_src or 'generate_image_for_post' in sched_src)
 
@@ -987,7 +992,7 @@ sched_src = (PKG_DIR / 'seta_post_scheduler.py').read_text()
 t.check('RULE: --deliver email is offered on the scheduler',
         '"--deliver"' in sched_src and "'email'" in sched_src or '"email"' in sched_src)
 t.check('RULE: email delivery is resolved BEFORE the expensive media step',
-        sched_src.index('EMAIL_DELIVERY_FAILED') < sched_src.index('uses Veo'))
+        sched_src.index('EMAIL_DELIVERY_FAILED') < sched_src.index("uses video - attempting HappyHorse"))  # log text renamed 2026-11-10 (HappyHorse)
 t.check('RULE: email delivery replaces publishing, never runs alongside it',
         'elif publisher:' in sched_src)
 t.check('RULE: a failed email is loud and greppable',
@@ -2717,5 +2722,16 @@ _pt = "2. German owners sell. Buyers check dealers. Contracts decide value. Plan
 t.check('REFLOW: a long numbered point keeps its marker with its text', _rfp(_pt).startswith("2. German"), repr(_rfp(_pt)))
 _wall = "One. Two. Three. Four. Five."
 t.check('REFLOW: an ordinary wall of text is still split', _rfp(_wall).count("\n\n") == 1, repr(_rfp(_wall)))
+
+# === HappyHorse video chain, offline with mocked HTTP (tests/hh_video_check.py, 2026-11-10) ===
+import subprocess as _sp
+_env = os.environ.copy()
+_env['PYTHONPATH'] = f'{PROJECT_ROOT}:{SEO_ROOT}:/opt/commonlib'
+_hh = _sp.run([PYTHON_BIN, str(Path(__file__).parent / 'hh_video_check.py')], capture_output=True, text=True,
+              env=_env, timeout=120)
+_lines = [l for l in _hh.stdout.splitlines() if l.startswith(('PASS ', 'FAIL '))]
+t.check('HAPPYHORSE: offline check ran', bool(_lines) and _hh.returncode == 0, (_hh.stderr or '')[-300:])
+for _l in _lines:
+    t.check('HAPPYHORSE: ' + _l[5:].split(' [')[0], _l.startswith('PASS '), _l)
 
 sys.exit(t.summary())
