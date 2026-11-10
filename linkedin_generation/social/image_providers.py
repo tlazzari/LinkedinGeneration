@@ -588,7 +588,7 @@ class AlibabaVideoProvider:
     CLIP_SECONDS = 5
     RESOLUTION = "1080p"
     # PAYG list price used only for the cost line in the log (~CNY 1.6/s at 1080p per secondary sources,
-    # 2026-11-10 - check the console bill; failed generations are not billed). On the Token Plan it uses credits.
+    # 2026-11-10 - check the console bill; failed generations are not billed). On the Token Plan it uses prepaid credits - real money too (Tom 10/11: it is a token bundle, not a flat plan).
     RATE_CNY_PER_S = 1.6
 
     @classmethod
@@ -610,7 +610,7 @@ class AlibabaVideoProvider:
     @classmethod
     def cost_estimate(cls) -> str:
         if cls.account() == "token_plan":
-            return f"monthly Token Plan credits ({cls.CLIP_SECONDS} s {cls.RESOLUTION}; no per-clip charge)"
+            return f"Token Plan credits ({cls.CLIP_SECONDS} s {cls.RESOLUTION}) - prepaid bundle, real money; check the console usage"
         return (f"est. cost CNY {cls.CLIP_SECONDS * cls.RATE_CNY_PER_S:.2f} "
                 f"({cls.CLIP_SECONDS} s x CNY {cls.RATE_CNY_PER_S}/s {cls.RESOLUTION})")
 
