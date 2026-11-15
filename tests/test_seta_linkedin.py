@@ -2662,44 +2662,68 @@ t.check('PROMPT: without a form the previous structure is unchanged',
         '3-4 SHORT paragraphs' in _pr0 and 'ENDS WITH A GENUINE OPEN QUESTION' in _pr0)
 
 # ============================================================================
-# MAX PLAN (Tom 2026-10-23: "use max subscription for the posts"). Seta's text is
-# written by Claude via claude_chain ('max' only); the brand's normal client is the
-# fallback. Never a Bolla tenant.
+# CENTRAL SOCIAL ROUTES: company subscription defaults stay central; tenants
+# carry explicit identity and can never fall back into Tom's personal plan.
 # ============================================================================
 import types as _types
 from linkedin_generation.social import max_plan_client as _mpc
+from linkedin_generation.social import model_policy as _social_policy
 class _FB:
-    label = 'fallback'
     def __init__(self): self.calls = 0
     def complete(self, prompt, **kw):
         self.calls += 1
         return '{"fallback": true}'
-t.check('MAXPLAN: Seta and TNT are wrapped (Tom 2026-10-23)', isinstance(_mpc.wrap_for_brand('seta', _FB()), _mpc.MaxPlanClient)
-        and isinstance(_mpc.wrap_for_brand('tnt', _FB()), _mpc.MaxPlanClient))
-t.check('WIRING: the TNT scheduler wraps its client too',
-        'wrap_for_brand("tnt", llm_client' in (PKG_DIR / 'linkedin_post_scheduler.py').read_text())
-t.check('MAXPLAN: a Bolla tenant is NEVER wrapped (the subscription is Tom\'s own)',
-        not isinstance(_mpc.wrap_for_brand('t10105_eratrend', _FB()), _mpc.MaxPlanClient))
-t.check('MAXPLAN: SOCIAL_MAX_PLAN=0 switches it off', not isinstance(_mpc.wrap_for_brand('seta', _FB(), enabled=False), _mpc.MaxPlanClient))
-_real_chain = sys.modules.get('claude_chain')
+class _RegistryText:
+    label = 'registry-test'
+    last_provider = 'selected-profile'
+    def __init__(self): self.calls = []; self.fail = False
+    def complete(self, prompt, **kw):
+        self.calls.append((prompt, kw))
+        if self.fail: raise RuntimeError('central route unavailable')
+        return '{"headline": "x"}'
+_route_calls = []
+_route_clients = []
+def _route_factory(**kwargs):
+    _route_calls.append(kwargs)
+    client = _RegistryText(); _route_clients.append(client)
+    return client
+_fake_registry = _types.SimpleNamespace(load=lambda: {'functions': {
+    name: {} for name in ('social_post_tnt', 'social_post_seta',
+                         'social_post_tenant', 'social_post_fallback')}})
+_real_text_client = _mpc.text_client
+_mpc.text_client = lambda brand_key, enabled=True: _social_policy.text_client(
+    brand_key, enabled=enabled, configs={'t10105_eratrend': {'tenant_id': 10105}},
+    registry=_fake_registry, factory=_route_factory)
 try:
-    sys.modules['claude_chain'] = _types.SimpleNamespace(complete=lambda *a, **k: ('', ''))
-    _fb = _FB(); _out = _mpc.MaxPlanClient(fallback=_fb).complete('p', max_tokens=800)
-    t.check('MAXPLAN: a Max-plan failure falls back - never costs a post', _fb.calls == 1 and 'fallback' in _out)
-    _seen = {}
-    def _ok(prompt, **k):
-        _seen.update(k); return ('{"headline": "x"}', 'max')
-    sys.modules['claude_chain'] = _types.SimpleNamespace(complete=_ok)
-    _fb = _FB(); _out = _mpc.MaxPlanClient(fallback=_fb).complete('p', max_tokens=800)
-    t.check('MAXPLAN: on success the fallback is not called', _fb.calls == 0 and '"headline"' in _out)
-    t.check('MAXPLAN: only the Max plan is tried (no paid API from this route)', _seen.get('order') == ('max',), _seen.get('order'))
+    for _brand in ('seta', 'tnt'):
+        _fb = _FB(); _client = _mpc.wrap_for_brand(_brand, _fb)
+        _out = _client.complete('post', max_tokens=800)
+        t.check('REGISTRY: ' + _brand + ' uses its company function',
+                _route_calls[-1] == {'function': 'social_post_' + _brand, 'account_scope': 'company'}
+                and '"headline"' in _out and _fb.calls == 0)
+        t.check('REGISTRY: company Max output floor is preserved',
+                _route_clients[-1].calls[-1][1]['max_tokens'] == 1600)
+    _tenant = _mpc.wrap_for_brand('t10105_eratrend', _FB())
+    _tenant.complete('tenant post', max_tokens=400, system='tenant voice')
+    t.check('REGISTRY: tenant never selects a company subscription function',
+            _route_calls[-1] == {'function': 'social_post_tenant', 'account_scope': 'tenant', 'tenant_id': 10105}
+            and _route_clients[-1].calls[-1][1] == {'max_tokens': 400, 'system': 'tenant voice'})
+    _before = len(_route_calls); _denied = False
+    try: _mpc.wrap_for_brand('t999_unmapped', _FB()).complete('post')
+    except ValueError: _denied = True
+    t.check('REGISTRY: missing tenant identity fails before any client construction',
+            _denied and len(_route_calls) == _before)
+    _mpc.wrap_for_brand('seta', _FB(), enabled=False).complete('post', max_tokens=400)
+    t.check('REGISTRY: subscription off selects the central API fallback function',
+            _route_calls[-1] == {'function': 'social_post_fallback', 'account_scope': 'company'}
+            and _route_clients[-1].calls[-1][1] == {'max_tokens': 400})
+    _fb = _FB(); _client = _mpc.wrap_for_brand('seta', _fb); _route_clients[-1].fail = True
+    _failed = False
+    try: _client.complete('post')
+    except RuntimeError: _failed = True
+    t.check('REGISTRY: central failure never invokes a private paid fallback', _failed and _fb.calls == 0)
 finally:
-    if _real_chain is not None:
-        sys.modules['claude_chain'] = _real_chain
-    else:
-        sys.modules.pop('claude_chain', None)
-t.check('WIRING: the scheduler wraps the client for the brand',
-        'wrap_for_brand(brand_key, llm_client' in (PKG_DIR / 'seta_post_scheduler.py').read_text())
+    _mpc.text_client = _real_text_client
 
 # 2026-10-23: KB deal names that are plain prose ("the deal", "the acquisition", "add on")
 # blocked any post containing those words.

@@ -20,8 +20,8 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
-from commonlib.llm_clients import QuotaExceededError, create_llm_client
 from linkedin_generation.social.max_plan_client import wrap_for_brand
+from linkedin_generation.social.model_policy import media_config
 from linkedin_generation.social import (
     CampaignConfig,
     LinkedInPostGenerator,
@@ -159,14 +159,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--llm-provider",
         type=str,
-        default=os.getenv("LLM_PROVIDER", "gemini"),
-        help="LLM provider identifier (gemini preferred; openrouter as fallback)",
+        default=None,
+        help="Deprecated: edit the central social model functions",
     )
     parser.add_argument(
         "--llm-model",
         type=str,
-        default=os.getenv("LLM_MODEL", "gemini-2.5-flash"),
-        help="LLM model identifier for the primary provider",
+        default=None,
+        help="Deprecated: edit the central social model functions",
     )
     parser.add_argument(
         "--run-once",
@@ -207,7 +207,10 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Run holiday-aware daily logic (ignores built-in schedule)",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.llm_provider is not None or args.llm_model is not None:
+        parser.error("Model selection is managed by the central social model functions")
+    return args
 
 
 def load_strategy(strategy_file: Path, override_text: Optional[str]) -> str:
@@ -266,7 +269,8 @@ def maybe_run_biweekly_site_updates() -> None:
 def ensure_image_provider(config: CampaignConfig):
     try:
         return create_image_provider(
-            replace(config.image_provider, logo_path=str(TNT_LOGO_PATH))
+            media_config(
+                replace(config.image_provider, logo_path=str(TNT_LOGO_PATH)), "tnt")
         )
     except Exception as exc:
         logging.warning("Primary image provider failed: %s", exc)
@@ -330,15 +334,9 @@ def generate_image_with_fallback(
     video_target_dir: Path | None = None,
 ) -> tuple[ImagePayload, Path | None]:
     if image_mode == IMAGE_MODE_VIDEO:
-        from linkedin_generation.social.image_providers import ReplicateVideoProvider
-        replicate_config = ImageProviderConfig(
-            provider="replicate",
-            model=campaign.image_provider.model,
-            size=campaign.image_provider.size,
-            curated_library=campaign.image_provider.curated_library,
-            style_hint=campaign.image_provider.style_hint,
-        )
-        replicate_provider = ReplicateVideoProvider(replicate_config)
+        from linkedin_generation.social.registry_media import RegistryVideoProvider
+        from linkedin_generation.social.model_policy import media_config
+        replicate_provider = RegistryVideoProvider(media_config(campaign.image_provider, "tnt", kind="video"))
         try:
             video_dir = video_target_dir or target_dir
             video_path = replicate_provider.get_video(prompt=prompt, target_dir=video_dir)
@@ -622,7 +620,6 @@ def build_job(
             next_image_mode,
         )
 
-        primary_llm = generator.llm_client
         try:
             post = generator.generate(
                 pillar=pillar,
@@ -635,23 +632,6 @@ def build_job(
                 "QUALITY_BLOCKED: skipping %s - %s", pillar.name, exc,
             )
             return None
-        except QuotaExceededError as exc:
-            logging.warning("Gemini quota reached (%s). Falling back to OpenRouter", exc)
-            fallback_model = os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet")
-            fallback_client = create_llm_client(provider="openrouter", model=fallback_model)
-            generator.llm_client = fallback_client
-            try:
-                post = generator.generate(
-                    pillar=pillar,
-                    scheduled_for=scheduled_for,
-                    post_type=next_post_type,
-                    image_mode=next_image_mode,
-                )
-                logging.info(
-                    "Generated post using OpenRouter fallback model %s", fallback_model
-                )
-            finally:
-                generator.llm_client = primary_llm
 
         try:
             image_payload, video_path = generate_image_with_fallback(
@@ -860,11 +840,9 @@ def main() -> None:
 
     strategy_text = load_strategy(args.strategy_file, args.strategy_text)
 
-    llm_client = create_llm_client(provider=args.llm_provider, model=args.llm_model)
-    # TNT's post text is written by Claude on Tom's Max subscription too (Tom 2026-10-23,
-    # "move tnt too"); the client above stays as the fallback. See max_plan_client.
-    llm_client = wrap_for_brand("tnt", llm_client,
+    llm_client = wrap_for_brand("tnt", None,
                                 enabled=os.getenv("SOCIAL_MAX_PLAN", "1") != "0")
+
     generator = LinkedInPostGenerator(
         campaign=campaign,
         llm_client=llm_client,

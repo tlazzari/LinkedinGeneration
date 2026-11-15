@@ -39,6 +39,10 @@ class ImageProviderConfig:
     # None = no overlay. MUST be set per brand — a hardcoded default here is
     # what put the TNT Motion logo on Seta Capital posts (May-Jul 2026).
     logo_path: str | None = None
+    model_function: str | None = None
+    account_scope: str = "company"
+    tenant_id: int | None = None
+    owner_profile: dict | None = None
 
     @classmethod
     def from_mapping(cls, data: Dict[str, Any]) -> "ImageProviderConfig":
@@ -774,7 +778,10 @@ def create_image_provider(config: ImageProviderConfig) -> ImageProvider:
     
     # Create base provider
     base_provider = None
-    if normalized in {"openrouter", "or"}:
+    if config.model_function:
+        from .registry_media import RegistryImageProvider
+        base_provider = RegistryImageProvider(config)
+    elif normalized in {"openrouter", "or"}:
         base_provider = OpenRouterImageProvider(config)
     elif normalized in {"openai", "dalle", "dall-e"}:
         base_provider = OpenAIImageProvider(config)

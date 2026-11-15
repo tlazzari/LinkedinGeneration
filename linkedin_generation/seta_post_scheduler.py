@@ -19,7 +19,6 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 
-from commonlib.llm_clients import QuotaExceededError, create_llm_client
 from linkedin_generation.social.variation import choose as choose_variation
 from linkedin_generation.social.max_plan_client import wrap_for_brand
 from linkedin_generation.social import CampaignConfig, PostPillar
@@ -130,14 +129,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--llm-provider",
         type=str,
-        default=os.getenv("LLM_PROVIDER", "gemini"),
-        help="LLM provider identifier",
+        default=None,
+        help="Deprecated: edit the central social model functions",
     )
     parser.add_argument(
         "--llm-model",
         type=str,
-        default=os.getenv("LLM_MODEL", "gemini-2.5-flash"),
-        help="LLM model identifier",
+        default=None,
+        help="Deprecated: edit the central social model functions",
     )
     parser.add_argument(
         "--run-once",
@@ -207,7 +206,10 @@ def parse_args() -> argparse.Namespace:
         default=Path(os.getenv("SETA_OUTPUT_DIR", "linkedin_generation/seta_posts")),
         help="Output directory for generated posts",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.llm_provider is not None or args.llm_model is not None:
+        parser.error("Model selection is managed by the central social model functions")
+    return args
 
 
 def load_strategy(strategy_file: Path, override_text: Optional[str]) -> str:
@@ -251,6 +253,7 @@ def generate_image_for_post(
     campaign: CampaignConfig,
     post: GeneratedPost,
     target_dir: Path,
+    brand_key: str = "seta",
 ) -> ImagePayload:
     """Generate an AI image for the post."""
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -261,13 +264,15 @@ def generate_image_for_post(
             provider="google",
             model=campaign.image_provider.model or GoogleImagenProvider.IMAGE_MODEL,
             size=campaign.image_provider.size or "1024x1024",
+            aspect_ratio=campaign.image_provider.aspect_ratio,
             style_hint=campaign.image_provider.style_hint,
             use_animated_gif=campaign.image_provider.use_animated_gif,
             gif_num_frames=campaign.image_provider.gif_num_frames,
             gif_frame_duration=campaign.image_provider.gif_frame_duration,
-            logo_path=str(SETA_LOGO_PATH) if SETA_LOGO_PATH.exists() else None,
+            logo_path=(str(SETA_LOGO_PATH) if SETA_LOGO_PATH.exists() else None) if brand_key == "seta" else campaign.image_provider.logo_path,
         )
-        provider = create_image_provider(provider_config)
+        from linkedin_generation.social.model_policy import media_config
+        provider = create_image_provider(media_config(provider_config, brand_key))
 
         # Enhance prompt with news context if available
         prompt = post.image_prompt
@@ -302,6 +307,7 @@ def generate_video_for_post(
     post: GeneratedPost,
     pillar,
     target_dir: Path,
+    brand_key: str = "seta",
 ) -> Path:
     """Generate the clip for pillars with use_veo=True (flag name kept for config compatibility).
 
@@ -317,8 +323,10 @@ def generate_video_for_post(
         f"Cinematic 16:9 professional footage evoking {pillar.angle.lower()[:80]}. "
         "Atmospheric, documentary style, warm professional colour grade."
     )
-    video_path = AlibabaVideoProvider().get_video(prompt=video_prompt, target_dir=target_dir)
-    logging.info("HappyHorse video generated: %s - %s", video_path, AlibabaVideoProvider.cost_estimate())
+    from linkedin_generation.social.registry_media import RegistryVideoProvider
+    from linkedin_generation.social.model_policy import media_config
+    video_path = RegistryVideoProvider(media_config(campaign.image_provider, brand_key, kind="video")).get_video(prompt=video_prompt, target_dir=target_dir)
+    logging.info("Central video task completed: %s", video_path)
     return video_path
 
 
@@ -496,6 +504,7 @@ def run_single_generation(
         video_failure = ""
         try:
             video_path = generate_video_for_post(
+                brand_key=brand_key,
                 campaign=campaign,
                 post=post,
                 pillar=pillar,
@@ -515,6 +524,7 @@ def run_single_generation(
             notify_tom_video_fallback(pillar.name, video_failure or "no video returned")
             try:
                 image_payload = generate_image_for_post(
+                    brand_key=brand_key,
                     campaign=campaign,
                     post=post,
                     target_dir=images_dir,
@@ -527,6 +537,7 @@ def run_single_generation(
         # Non-Veo, non-chart pillar (e.g. Industry Expertise) — animated GIF image
         try:
             image_payload = generate_image_for_post(
+                brand_key=brand_key,
                 campaign=campaign,
                 post=post,
                 target_dir=images_dir,
@@ -878,6 +889,7 @@ def _run_holiday_post(
     images_dir = output_dir / "images"
     try:
         image_payload = generate_image_for_post(
+            brand_key=brand_key,
             campaign=campaign,
             post=post,
             target_dir=images_dir,
@@ -973,10 +985,7 @@ def main() -> None:
     strategy = load_strategy(args.strategy_file, args.strategy_text)
 
     # Create LLM client
-    llm_client = create_llm_client(provider=args.llm_provider, model=args.llm_model)
-    # Seta's post text is written by Claude on Tom's Max subscription (Tom 2026-10-23);
-    # the client above stays as the fallback. Never for a Bolla tenant - see max_plan_client.
-    llm_client = wrap_for_brand(brand_key, llm_client,
+    llm_client = wrap_for_brand(brand_key, None,
                                 enabled=os.getenv("SOCIAL_MAX_PLAN", "1") != "0")
 
     # Create generator

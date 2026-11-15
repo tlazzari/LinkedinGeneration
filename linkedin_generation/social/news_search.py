@@ -835,19 +835,38 @@ def _gemini_spend() -> None:
         pass
 
 
+def _registry_grounded_request(payload):
+    """Every paid attempt retains Google search grounding and the existing daily cap."""
+    from .model_policy import owner_chain, owner_key
+    from .registry_media import _post_json
+    rows = owner_chain("social_news_grounded")
+    if any(row.get("owner_protocol") != "google_grounded_text" for row in rows):
+        raise ValueError("Selected news protocol cannot provide required Google grounding")
+    if payload.get("tools") != [{"google_search": {}}]:
+        raise ValueError("News requests require Google search grounding")
+    for row in rows:
+        try:
+            key = owner_key(row)
+        except ValueError:
+            continue
+        if not key:
+            continue
+        if _gemini_calls_left() <= 0:
+            raise RuntimeError("Grounded news daily call budget exhausted")
+        _gemini_spend()
+        try:
+            return _post_json(
+                row["base_url"].rstrip("/") + "/v1beta/models/" + row["model"] + ":generateContent",
+                headers={"x-goog-api-key": key}, json=payload, timeout=row.get("timeout_s", 30))
+        except Exception:
+            continue
+    raise RuntimeError("Central grounded news chain unavailable")
+
+
 def search_news_gemini(query: str, num_results: int = 5) -> List[dict]:
     """Search news using Gemini with Google Search grounding."""
-    api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        logger.warning("GOOGLE_API_KEY not set, skipping Gemini search")
-        return []
-
     try:
         import json as json_module
-
-        # Use Gemini with Google Search grounding
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-
         from datetime import datetime
         current_year = datetime.now().year
         current_month = datetime.now().strftime("%B %Y")
@@ -886,9 +905,7 @@ Return ONLY valid JSON array, no other text."""
             }
         }
 
-        response = requests.post(url, json=payload, timeout=30)
-        response.raise_for_status()
-        data = response.json()
+        data = _registry_grounded_request(payload)
 
         # Extract the text response. Grounded replies are split across several
         # parts; reading only parts[0] silently truncated the JSON.
@@ -1546,7 +1563,6 @@ def search_news_for_pillar(
             for query in (zh_queries + en_queries)[:2]:
                 if _gemini_calls_left() <= 0:
                     break
-                _gemini_spend()
                 absorb(search_news_gemini(query, num_results=5))
                 if len(all_results) >= num_articles * 2:
                     break
