@@ -2191,9 +2191,28 @@ t.check('ORDER: Gemini is tried before the undated free scrapers',
         'DuckDuckGo results carry no date, so the freshness rule cannot run on them')
 t.check('ORDER: Gemini tops up rather than replacing the free providers',
         'if len(all_results) < num_articles * 2:' in _body)
+# The cap belongs at the transport attempt boundary, including fallback attempts.
+# Exercise it with fake owner rows and HTTP; no usage-file write or credential lookup.
+from unittest import mock as _cost_mock
+_cost_rows = [dict(owner_protocol='google_grounded_text', base_url='https://fake.invalid',
+                   model='fake-grounded', timeout_s=1)] * 2
+_cost_used = [0]
+def _cost_spend(): _cost_used[0] += 1
+def _cost_http(*args, **kwargs): raise RuntimeError('fake provider unavailable')
+with _cost_mock.patch('linkedin_generation.social.model_policy.owner_chain', return_value=_cost_rows), \
+     _cost_mock.patch('linkedin_generation.social.model_policy.owner_key', return_value='fake-key'), \
+     _cost_mock.patch.object(_ns_mod, '_gemini_calls_left', side_effect=lambda: max(0, 1-_cost_used[0])), \
+     _cost_mock.patch.object(_ns_mod, '_gemini_spend', side_effect=_cost_spend), \
+     _cost_mock.patch('linkedin_generation.social.registry_media._post_json', side_effect=_cost_http) as _cost_transport:
+    try: _ns_mod._registry_grounded_request({'tools': [{'google_search': {}}]})
+    except RuntimeError: pass
+    _cost_cap_ok = _cost_used[0] == 1 and _cost_transport.call_count == 1
+    try: _ns_mod._registry_grounded_request({'tools': [{'google_search': {}}]})
+    except RuntimeError: pass
+    _cost_cap_ok = _cost_cap_ok and _cost_transport.call_count == 1
 t.check('COST: Gemini calls are capped per day',
         _ns_mod.GEMINI_NEWS_CAP_PER_DAY > 0 and '_gemini_calls_left()' in _body
-        and '_gemini_spend()' in _body)
+        and _cost_cap_ok)
 t.check('COST: the cap is small enough to stay inside the free grounding allowance',
         _ns_mod.GEMINI_NEWS_CAP_PER_DAY <= 100)
 t.check('COST: the daily counter resets, so the cap cannot lock news out for good',
