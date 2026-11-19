@@ -29,4 +29,22 @@ class ModelPolicyTests(unittest.TestCase):
         M.text_client('furniture',configs={'furniture':{'tenant_id':7}},registry=self.registry,factory=factory)
         factory.assert_called_once_with(function='social_post_tenant',account_scope='tenant',tenant_id=7)
 
+    def test_live_social_routes_accept_the_temperature_the_generators_send(self):
+        # 19/11 incident: the Seta/TNT generators always pass temperature=0.8. claude_cli/codex_cli have no such
+        # control, and without option_policy temperature=native_default the gateway refused Opus in 0.2 s
+        # (required_option_unsupported -> "outage"), so Gemini silently wrote every Seta/TNT post since 17/11.
+        import json
+        registry=Path('/opt/scripts/ai_models.json')
+        if not registry.exists():self.skipTest('central registry not on this host')
+        d=json.loads(registry.read_text())
+        cli={'claude_cli','codex_cli'}
+        checked=0
+        for name,row in d['functions'].items():
+            if not name.startswith('social_post_'):continue
+            if any(d['models'][m]['adapter'] in cli for m in row['chain']):
+                checked+=1
+                self.assertEqual(row.get('option_policy'),{'temperature':'native_default'},
+                                 name+': CLI model in chain but temperature would make the gateway skip it')
+        self.assertGreaterEqual(checked,2,'expected the Seta and TNT routes to have a Claude/Codex CLI model')
+
 if __name__=='__main__':unittest.main()
